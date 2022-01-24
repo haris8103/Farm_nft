@@ -2,22 +2,26 @@
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
     to_binary, Binary, BlockInfo, Deps, DepsMut, Env, MessageInfo, Order, Response, StdError,
-    StdResult,
+    StdResult, Storage, WasmMsg, CosmosMsg, Addr
 };
 
 use cw0::maybe_addr;
 use cw2::set_contract_version;
-use cw721::{ContractInfoResponse, NumTokensResponse, OwnerOfResponse, TokensResponse};
+use cw721::{
+    ContractInfoResponse, NumTokensResponse, OwnerOfResponse, TokensResponse, Cw721ReceiveMsg
+};
 
 use cw721_base::contract::{execute_send_nft, execute_transfer_nft};
-use cw721_base::state::{increment_tokens, num_tokens, tokens, Approval, TokenInfo, CONTRACT_INFO};
+use cw721_base::state::{increment_tokens, num_tokens, tokens, Approval, TokenInfo, CONTRACT_INFO, TOKEN_COUNT, OPERATORS};
 use cw721_base::ContractError; // TODO use custom errors instead
 use cw_storage_plus::Bound;
 
 use crate::msg::{
-    AllNftInfoResponse, BoostMsg, ExecuteMsg, InstantiateMsg, MintMsg, NftInfoResponse, QueryMsg, Extension
+    AllNftInfoResponse, BoostMsg, ExecuteMsg, Extension, InstantiateMsg, MintMsg, NftInfoResponse,
+    QueryMsg,
 };
-use crate::state::{LEVEL_DATA, Config, CONFIG};
+
+use crate::state::{Config, CONFIG, LEVEL_DATA};
 
 // version info for migration info
 const CONTRACT_NAME: &str = "crates.io:loop-nft";
@@ -42,6 +46,7 @@ pub fn instantiate(
 
     let config = Config {
         minter: _info.sender.to_string(),
+        cw721_address: "".to_string(),
     };
     CONTRACT_INFO.save(deps.storage, &contract_info)?;
     CONFIG.save(deps.storage, &config)?;
@@ -67,6 +72,107 @@ pub fn execute(
             token_id,
             msg,
         } => execute_send_nft(deps, env, info, contract, token_id, msg),
+        ExecuteMsg::ReceiveNft (  msg ) => {
+            execute_receive(deps, env, info, msg)
+        }
+    }
+}
+
+fn execute_burn(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    token_id: String,
+) -> Result<Response, ContractError> {
+    let token = tokens().load(deps.storage, &token_id)?;
+    _check_can_send(deps.as_ref(), &env, &info, &token)?;
+
+    tokens().remove(deps.storage, &token_id)?;
+    decrement_tokens(deps.storage)?;
+
+    Ok(Response::new()
+        .add_attribute("action", "burn")
+        .add_attribute("sender", info.sender)
+        .add_attribute("token_id", token_id))
+}
+
+pub fn decrement_tokens( storage: &mut dyn Storage) -> StdResult<u64> {
+    let val = num_tokens(storage)? - 1;
+    TOKEN_COUNT.save(storage, &val)?;
+    Ok(val)
+}
+pub fn execute_receive(
+    deps: DepsMut,
+    env: Env, 
+    info: MessageInfo,
+    msg: Cw721ReceiveMsg,
+) -> Result<Response, ContractError> {
+    if env.contract.address != info.sender {
+        return Err(ContractError::Unauthorized {});
+    }
+    //let mut messages: Vec<CosmosMsg> = Vec::new();
+    let config = CONFIG.load(deps.storage)?;
+   // let mut token = tokens().load(deps.storage, &msg.token_id.to_string())?;
+    let contract_addr = env.clone().contract.address.into_string();
+    
+
+    //execute_transfer_nft(deps, env, info, sender, "2".to_string())?;
+
+    
+
+
+    let callback = CosmosMsg::Wasm(WasmMsg::Execute {
+        contract_addr: contract_addr,
+        msg: to_binary(&ExecuteMsg::TransferNft {
+            recipient: info.sender.to_string(),
+            token_id: msg.token_id.to_string(),
+        })?,
+        funds: vec![],
+    });
+ 
+    execute_burn(deps, env, info.clone(), msg.token_id.to_string())?;
+
+
+    // let mint_msg = Cw721ExecuteMsg::Mint(MintMsg::<Extension> {
+    //     token_id: config.unused_token_id.to_string(),
+    //     owner: sender,
+    //     token_uri: config.token_uri.clone().into(),
+    //     extension: config.extension.clone(),
+    // });
+    Ok(Response::new().add_message(callback))
+}
+
+pub fn _check_can_send(
+    deps: Deps,
+    env: &Env,
+    info: &MessageInfo,
+    token: &TokenInfo,
+) -> Result<(), ContractError> {
+    // owner can send
+    if token.owner == info.sender {
+        return Ok(());
+    }
+
+    // any non-expired token approval can send
+    if token
+        .approvals
+        .iter()
+        .any(|apr| apr.spender == info.sender && !apr.is_expired(&env.block))
+    {
+        return Ok(());
+    }
+
+    // operator can send
+    let op = OPERATORS.may_load(deps.storage, (&token.owner, &info.sender))?;
+    match op {
+        Some(ex) => {
+            if ex.is_expired(&env.block) {
+                Err(ContractError::Unauthorized {})
+            } else {
+                Ok(())
+            }
+        }
+        None => Err(ContractError::Unauthorized {}),
     }
 }
 
@@ -76,20 +182,18 @@ pub fn execute_mint(
     info: MessageInfo,
     msg: MintMsg,
 ) -> Result<Response, ContractError> {
-
     let config = CONFIG.load(deps.storage)?;
 
     if info.sender != config.minter {
-        return Err(ContractError::Std(StdError::generic_err(
-            "Unauthorized",
-        )));
+        return Err(ContractError::Std(StdError::generic_err("Unauthorized")));
     }
+
     // create the token
     let token = TokenInfo {
         name: msg.name.clone(),
         description: "".to_string(),
         image: Some(msg.image.clone()),
-        owner: info.sender.clone(),
+        owner: msg.owner,
         approvals: vec![],
     };
     tokens().update(deps.storage, &msg.token_id, |old| match old {

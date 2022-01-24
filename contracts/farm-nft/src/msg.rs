@@ -1,5 +1,5 @@
 use cosmwasm_std::{Addr, Binary};
-use cw721::OwnerOfResponse;
+use cw721::{OwnerOfResponse, Cw721ReceiveMsg};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -19,6 +19,9 @@ pub struct MintMsg {
     pub name: String,
     /// A URI pointing to an image representing the asset
     pub image: String,
+
+    
+    pub owner: Addr,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -51,6 +54,8 @@ pub enum ExecuteMsg {
         token_id: String,
         msg: Binary,
     },
+
+    ReceiveNft(Cw721ReceiveMsg),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
