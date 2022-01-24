@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MintMsg",
+  "type": "object",
+  "required": [
+    "image",
+    "name",
+    "token_id"
+  ],
+  "properties": {
+    "image": {
+      "description": "A URI pointing to an image representing the asset",
+      "type": "string"
+    },
+    "name": {
+      "description": "Identifies the asset to which this NFT represents",
+      "type": "string"
+    },
+    "token_id": {
+      "description": "Unique ID of the NFT",
+      "type": "string"
+    }
+  }
+}
