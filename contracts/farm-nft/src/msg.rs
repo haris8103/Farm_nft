@@ -46,6 +46,7 @@ pub enum ExecuteMsg {
 
     /// Transfer is a base message to move a token to another account without triggering actions
     TransferNft { recipient: String, token_id: String },
+    Burn { token_id: String },
 
     /// Send is a base message to transfer a token to a contract and trigger an action
     /// on the receiving contract.

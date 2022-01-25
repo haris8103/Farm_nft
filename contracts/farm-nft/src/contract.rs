@@ -2,7 +2,7 @@
 use cosmwasm_std::entry_point;
 use cosmwasm_std::{
     to_binary, Binary, BlockInfo, Deps, DepsMut, Env, MessageInfo, Order, Response, StdError,
-    StdResult, Storage, WasmMsg, CosmosMsg, Addr
+    StdResult, Storage, WasmMsg, CosmosMsg,
 };
 
 use cw0::maybe_addr;
@@ -67,6 +67,9 @@ pub fn execute(
             recipient,
             token_id,
         } => execute_transfer_nft(deps, env, info, recipient, token_id),
+        ExecuteMsg::Burn {
+            token_id,
+        } => execute_burn(deps, env, info,token_id),
         ExecuteMsg::SendNft {
             contract,
             token_id,
@@ -101,8 +104,9 @@ pub fn decrement_tokens( storage: &mut dyn Storage) -> StdResult<u64> {
     TOKEN_COUNT.save(storage, &val)?;
     Ok(val)
 }
+
 pub fn execute_receive(
-    deps: DepsMut,
+    _deps: DepsMut,
     env: Env, 
     info: MessageInfo,
     msg: Cw721ReceiveMsg,
@@ -111,27 +115,31 @@ pub fn execute_receive(
         return Err(ContractError::Unauthorized {});
     }
     //let mut messages: Vec<CosmosMsg> = Vec::new();
-    let config = CONFIG.load(deps.storage)?;
+    //let config = CONFIG.load(deps.storage)?;
    // let mut token = tokens().load(deps.storage, &msg.token_id.to_string())?;
-    let contract_addr = env.clone().contract.address.into_string();
+    let contract_addr = env.contract.address.into_string();
     
 
     //execute_transfer_nft(deps, env, info, sender, "2".to_string())?;
 
-    
-
-
     let callback = CosmosMsg::Wasm(WasmMsg::Execute {
-        contract_addr: contract_addr,
+        contract_addr: contract_addr.clone(),
         msg: to_binary(&ExecuteMsg::TransferNft {
-            recipient: info.sender.to_string(),
-            token_id: msg.token_id.to_string(),
+            recipient: msg.sender.to_string(),
+            token_id: "2".to_string(),
         })?,
         funds: vec![],
     });
  
-    execute_burn(deps, env, info.clone(), msg.token_id.to_string())?;
+   // execute_burn(deps, env, info.clone(), msg.token_id.to_string())?;
 
+    let callback2 = CosmosMsg::Wasm(WasmMsg::Execute {
+        contract_addr: contract_addr,
+        msg: to_binary(&ExecuteMsg::Burn {
+            token_id: msg.token_id,
+        })?,
+        funds: vec![],
+    });
 
     // let mint_msg = Cw721ExecuteMsg::Mint(MintMsg::<Extension> {
     //     token_id: config.unused_token_id.to_string(),
@@ -139,7 +147,7 @@ pub fn execute_receive(
     //     token_uri: config.token_uri.clone().into(),
     //     extension: config.extension.clone(),
     // });
-    Ok(Response::new().add_message(callback))
+    Ok(Response::new().add_message(callback).add_message(callback2))
 }
 
 pub fn _check_can_send(
