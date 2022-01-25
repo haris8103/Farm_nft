@@ -103,6 +103,7 @@ pub fn execute_mint(
     if msg.owner == env.contract.address {
         let mut token_infos= REWARDS.load(deps.storage)?;
         token_infos.push(msg.token_id.to_string());
+        REWARDS.save(deps.storage, &token_infos)?;
     }
     tokens().update(deps.storage, &msg.token_id, |old| match old {
         Some(_) => Err(ContractError::Claimed {}),
@@ -391,6 +392,7 @@ pub fn execute_receive(
     let mut token_ids = REWARDS.load(deps.storage)?;
     let random_number = generate_random_number(time_in_epoch_seconds, token_ids.len() as u64);
     let token_id = token_ids.swap_remove(random_number as usize);
+    REWARDS.save(deps.storage, &token_ids)?;
 
     //let mut messages: Vec<CosmosMsg> = Vec::new();
     //let config = CONFIG.load(deps.storage)?;
