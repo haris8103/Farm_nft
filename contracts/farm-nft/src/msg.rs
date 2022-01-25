@@ -1,5 +1,5 @@
 use cosmwasm_std::{Addr, Binary};
-use cw721::{OwnerOfResponse, Cw721ReceiveMsg};
+use cw721::{Cw721ReceiveMsg, OwnerOfResponse};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -13,15 +13,17 @@ pub struct InstantiateMsg {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct MintMsg {
+    pub owner: Addr,
     /// Unique ID of the NFT
     pub token_id: String,
     /// Identifies the asset to which this NFT represents
     pub name: String,
     /// A URI pointing to an image representing the asset
     pub image: String,
-
-    
-    pub owner: Addr,
+    /// Describes the asset to which this NFT represents (may be empty)
+    pub description: Option<String>,
+    /// Custom extensions
+    pub rarity: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -42,11 +44,16 @@ pub enum ExecuteMsg {
     Mint(MintMsg),
 
     /// Merge existing NFTs and mint new level NFT
-    Boost(BoostMsg),
+    //  Boost(BoostMsg),
 
     /// Transfer is a base message to move a token to another account without triggering actions
-    TransferNft { recipient: String, token_id: String },
-    Burn { token_id: String },
+    TransferNft {
+        recipient: String,
+        token_id: String,
+    },
+    Burn {
+        token_id: String,
+    },
 
     /// Send is a base message to transfer a token to a contract and trigger an action
     /// on the receiving contract.
@@ -121,7 +128,7 @@ pub struct Extension {
     /// ratio between 1.91:1 and 4:5 inclusive.
     /// TODO: Use https://docs.rs/url_serde for type-safety
     pub image: Option<String>,
-    pub level: u16,
+    pub rarity: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
