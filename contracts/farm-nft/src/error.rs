@@ -15,6 +15,12 @@ pub enum ContractError {
 
     #[error("Cannot set approval that is already expired")]
     Expired {},
+
+    #[error("No token found")]
+    NotFound {},
+
+    #[error("Not eligible")]
+    NotEligible {},
 }
 
 impl From<cw721_base::ContractError> for ContractError {

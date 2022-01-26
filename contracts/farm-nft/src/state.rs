@@ -4,6 +4,7 @@ use cw721::{ContractInfoResponse, Expiration};
 use cw_storage_plus::{Index, IndexList, IndexedMap, Item, Map, MultiIndex};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct TokenInfo {
@@ -20,6 +21,12 @@ pub struct TokenInfo {
     pub image: String,
 
     pub rarity: String,
+
+    pub wait_time_for_nft_reward: u64,
+
+    pub reward_start_time: u64,
+
+    pub is_reward_token: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
@@ -81,7 +88,7 @@ pub const LEVEL_DATA: Map<&str, u16> = Map::new("level_data");
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
 pub struct Config {
     pub minter: String,
-    pub cw721_address: String,
 }
 pub const CONFIG: Item<Config> = Item::new("Config");
-pub const REWARDS: Item<Vec<String>> = Item::new("PACKS");
+pub const REWARDS: Map<String, Vec<String>> = Map::new("Rewards");
+pub const REWARD_ITEMS: Item<HashSet<String>> = Item::new("RewardItems");

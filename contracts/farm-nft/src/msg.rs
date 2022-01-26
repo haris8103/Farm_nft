@@ -1,4 +1,5 @@
 use cosmwasm_std::{Addr, Binary};
+use cw20::Cw20ReceiveMsg;
 use cw721::{Cw721ReceiveMsg, OwnerOfResponse};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -64,6 +65,11 @@ pub enum ExecuteMsg {
     },
 
     ReceiveNft(Cw721ReceiveMsg),
+
+    ClaimReward {
+        token_id: String,
+    },
+    Receive(Cw20ReceiveMsg),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

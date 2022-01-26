@@ -1,27 +1,29 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::{
     entry_point, to_binary, Binary, BlockInfo, CosmosMsg, Deps, DepsMut, Env, MessageInfo, Order,
-    Response, StdError, StdResult, Storage, WasmMsg,
+    Response, StdError, StdResult, Storage, Uint128, WasmMsg,
 };
 
 use cw0::maybe_addr;
 use cw2::set_contract_version;
+use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
 use cw721::{
     ContractInfoResponse, Cw721ReceiveMsg, Expiration, NumTokensResponse, OwnerOfResponse,
     TokensResponse,
 };
-
+use std::collections::HashSet;
 //use cw721_base::contract::{execute_send_nft, execute_transfer_nft};
 
-use cw721_base::ContractError; // TODO use custom errors instead
+//use cw721_base::ContractError; // TODO use custom errors instead
 use cw_storage_plus::Bound;
 
+use crate::error::ContractError;
 use crate::msg::{
     AllNftInfoResponse, ExecuteMsg, Extension, InstantiateMsg, MintMsg, NftInfoResponse, QueryMsg,
 };
 use crate::state::{
     increment_tokens, num_tokens, tokens, Approval, Config, TokenInfo, CONFIG, CONTRACT_INFO,
-    OPERATORS, REWARDS, TOKEN_COUNT,
+    OPERATORS, REWARDS, REWARD_ITEMS, TOKEN_COUNT,
 };
 
 // version info for migration info
@@ -47,11 +49,10 @@ pub fn instantiate(
 
     let config = Config {
         minter: _info.sender.to_string(),
-        cw721_address: "".to_string(),
     };
     CONTRACT_INFO.save(deps.storage, &contract_info)?;
     CONFIG.save(deps.storage, &config)?;
-    REWARDS.save(deps.storage, &vec![])?;
+    REWARD_ITEMS.save(deps.storage, &HashSet::<String>::new())?;
     Ok(Response::default())
 }
 
@@ -75,10 +76,36 @@ pub fn execute(
             token_id,
             msg,
         } => execute_send_nft(deps, env, info, contract, token_id, msg),
-        ExecuteMsg::ReceiveNft(msg) => execute_receive(deps, env, info, msg),
+        ExecuteMsg::ReceiveNft(msg) => execute_receive_cw721(deps, env, info, msg),
+        ExecuteMsg::ClaimReward { token_id } => execute_claim_reward(deps, env, info, token_id),
+        ExecuteMsg::Receive(msg) => execute_receive_cw20(deps, env, info, msg),
     }
 }
+pub fn execute_receive_cw20(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    msg: Cw20ReceiveMsg,
+) -> Result<Response, ContractError> {
+    let callback = CosmosMsg::Wasm(WasmMsg::Execute {
+        //sending reward to user
+        contract_addr: info.sender.to_string(),
+        msg: to_binary(&Cw20ExecuteMsg::Burn { amount: msg.amount })?,
+        funds: vec![],
+    });
+    let msg = MintMsg {
+        owner: deps.api.addr_validate(&msg.sender)?,
+        name: "Salman".to_string(),
+        token_id: "50".to_string(),
+        description: Some("".to_string()),
+        image: "ipfs://QmVnu7JQVoDRqSgHBzraYp7Hy78HwJtLFi6nUFCowTGdzp/1.png".to_string(),
+        rarity: "axe".to_string(),
+    };
 
+    mint(deps, &env, &msg);
+
+    Ok(Response::new().add_message(callback))
+}
 pub fn execute_mint(
     deps: DepsMut,
     env: Env,
@@ -92,34 +119,55 @@ pub fn execute_mint(
     }
 
     // create the token
-    let token = TokenInfo {
-        owner: msg.owner.clone(),
-        approvals: vec![],
-        name: msg.name,
-        description: msg.description.unwrap_or_default(),
-        image: msg.image,
-        rarity: msg.rarity,
-    };
-    if msg.owner == env.contract.address {
-        let mut token_infos= REWARDS.load(deps.storage)?;
-        token_infos.push(msg.token_id.to_string());
-        REWARDS.save(deps.storage, &token_infos)?;
-    }
-    tokens().update(deps.storage, &msg.token_id, |old| match old {
-        Some(_) => Err(ContractError::Claimed {}),
-        None => Ok(token),
-    })?;
-
-    increment_tokens(deps.storage)?;
-
+    mint(deps, &env, &msg);
+    
     Ok(Response::new()
         .add_attribute("action", "mint")
         .add_attribute("minter", info.sender)
         .add_attribute("token_id", msg.token_id)
-        .add_attribute("contract address",  env.contract.address.into_string())
+        .add_attribute("contract address", env.contract.address.into_string())
         .add_attribute("owner", msg.owner))
 }
 
+pub fn mint(deps: DepsMut, env: &Env, msg: &MintMsg) {
+    let mut token = TokenInfo {
+        owner: msg.owner.clone(),
+        approvals: vec![],
+        name: msg.name.to_string(),
+        description: msg.description.clone().unwrap_or_default(),
+        image: msg.image.to_string(),
+        rarity: msg.rarity.to_string(),
+        wait_time_for_nft_reward: env.block.time.seconds(),
+        reward_start_time: 0,
+        is_reward_token: false,
+    };
+    if msg.owner == env.contract.address {
+        let mut token_ids = if let Some(token_ids) = REWARDS
+            .may_load(deps.storage, msg.name.to_string())
+            .unwrap()
+        {
+            token_ids
+        } else {
+            vec![]
+        };
+        token_ids.push(msg.token_id.to_string());
+        let mut set = REWARD_ITEMS.load(deps.storage).unwrap();
+        set.insert(msg.name.to_string());
+        REWARDS
+            .save(deps.storage, msg.name.to_string(), &token_ids)
+            .unwrap();
+        REWARD_ITEMS.save(deps.storage, &set).unwrap();
+        token.is_reward_token = true;
+    }
+    tokens()
+        .update(deps.storage, &msg.token_id, |old| match old {
+            Some(_) => Err(ContractError::Claimed {}),
+            None => Ok(token),
+        })
+        .unwrap();
+
+    increment_tokens(deps.storage).unwrap();
+}
 pub fn execute_transfer_nft(
     deps: DepsMut,
     env: Env,
@@ -162,54 +210,54 @@ pub fn execute_send_nft(
         .add_attribute("token_id", token_id))
 }
 
-pub fn execute_receive(
+pub fn execute_receive_cw721(
     deps: DepsMut,
     env: Env,
     info: MessageInfo,
     msg: Cw721ReceiveMsg,
 ) -> Result<Response, ContractError> {
-    
     if env.contract.address != info.sender {
         return Err(ContractError::Unauthorized {});
     }
-
+    let token = tokens().load(deps.storage, &msg.token_id)?;
+    let mut responses: Vec<CosmosMsg> = vec![];
     // check that only pack can be opened, not any ohter nft from our contract
-    if msg.token_id.clone() != "1" {
-        return Err(ContractError::Unauthorized {});
-    }   
-
-
-    let time_in_epoch_seconds = env.block.time.seconds();
-    let mut token_ids = REWARDS.load(deps.storage)?;
-    let random_number = generate_random_number(time_in_epoch_seconds, token_ids.len() as u64);
-    let token_id = token_ids.swap_remove(random_number as usize);
-    REWARDS.save(deps.storage, &token_ids)?;
-
-    //let mut messages: Vec<CosmosMsg> = Vec::new();
-    //let config = CONFIG.load(deps.storage)?;
-    // let mut token = tokens().load(deps.storage, &msg.token_id.to_string())?;
+    if token.is_reward_token {
+        return Err(ContractError::NotEligible {});
+    }
+    let set: HashSet<String> = REWARD_ITEMS.load(deps.storage)?;
     let contract_addr = env.contract.address.into_string();
 
-    //execute_transfer_nft(deps, env, info, sender, "2".to_string())?;
+    for name in set.iter() {
+        let time_in_epoch_seconds = env.block.time.seconds();
+        let mut token_ids =
+            if let Some(token_ids) = REWARDS.may_load(deps.storage, name.to_string())? {
+                token_ids
+            } else {
+                vec![]
+            };
+        let random_number = generate_random_number(time_in_epoch_seconds, token_ids.len() as u64);
+        let token_id = token_ids.swap_remove(random_number as usize);
+        REWARDS.save(deps.storage, name.to_string(), &token_ids)?;
 
-    let callback = CosmosMsg::Wasm(WasmMsg::Execute {
-        contract_addr: contract_addr.clone(),
-        msg: to_binary(&ExecuteMsg::TransferNft {
-            recipient: msg.sender.to_string(),
-            token_id: token_id,
-        })?,
-        funds: vec![],
-    });
-
-    let callback2 = CosmosMsg::Wasm(WasmMsg::Execute {
-        contract_addr: contract_addr,
+        responses.push(CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr: contract_addr.clone(),
+            msg: to_binary(&ExecuteMsg::TransferNft {
+                recipient: msg.sender.to_string(),
+                token_id,
+            })?,
+            funds: vec![],
+        }));
+    }
+    responses.push(CosmosMsg::Wasm(WasmMsg::Execute {
+        contract_addr,
         msg: to_binary(&ExecuteMsg::Burn {
             token_id: msg.token_id,
         })?,
         funds: vec![],
-    });
+    }));
 
-    Ok(Response::new().add_message(callback).add_message(callback2))
+    Ok(Response::new().add_messages(responses))
 }
 
 pub fn _transfer_nft(
@@ -219,13 +267,13 @@ pub fn _transfer_nft(
     recipient: &str,
     token_id: &str,
 ) -> Result<TokenInfo, ContractError> {
-    let mut token = tokens().load(deps.storage, &token_id)?;
+    let mut token = tokens().load(deps.storage, token_id)?;
     // ensure we have permissions
     check_can_send(deps.as_ref(), env, info, &token)?;
     // set owner and remove existing approvals
     token.owner = deps.api.addr_validate(recipient)?;
     token.approvals = vec![];
-    tokens().save(deps.storage, &token_id, &token)?;
+    tokens().save(deps.storage, token_id, &token)?;
     Ok(token)
 }
 
@@ -246,6 +294,38 @@ pub fn execute_approve(
         .add_attribute("token_id", token_id))
 }
 
+pub fn execute_claim_reward(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    token_id: String,
+) -> Result<Response, ContractError> {
+    let mut callback: Vec<CosmosMsg> = vec![];
+    let token_info = if let Some(token_info) = tokens().may_load(deps.storage, &token_id)? {
+        token_info
+    } else {
+        return Err(ContractError::NotFound {});
+    };
+
+    if token_info.owner != info.sender {
+        return Err(ContractError::Unauthorized {});
+    }
+
+    if token_info.reward_start_time + token_info.wait_time_for_nft_reward < env.block.time.seconds()
+    {
+        callback.push(CosmosMsg::Wasm(WasmMsg::Execute {
+            //sending reward to user
+            contract_addr: "terra15fgyuajjsw2wh7qvsslhz2j6u7g5lt02r9zul3".to_string(),
+            msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                recipient: info.sender.to_string(),
+                amount: Uint128::from(2u128),
+            })?,
+            funds: vec![],
+        }));
+    }
+
+    Ok(Response::new().add_messages(callback))
+}
 pub fn execute_revoke(
     deps: DepsMut,
     env: Env,
@@ -272,7 +352,7 @@ pub fn _update_approvals(
     add: bool,
     expires: Option<Expiration>,
 ) -> Result<TokenInfo, ContractError> {
-    let mut token = tokens().load(deps.storage, &token_id)?;
+    let mut token = tokens().load(deps.storage, token_id)?;
     // ensure we have permissions
     check_can_approve(deps.as_ref(), env, info, &token)?;
 
@@ -298,13 +378,12 @@ pub fn _update_approvals(
         token.approvals.push(approval);
     }
 
-    tokens().save(deps.storage, &token_id, &token)?;
+    tokens().save(deps.storage, token_id, &token)?;
 
     Ok(token)
 }
 pub fn generate_random_number(time_in_epoch_seconds: u64, limit: u64) -> u64 {
-    let random_number = time_in_epoch_seconds % limit;
-    random_number
+    time_in_epoch_seconds % limit
 }
 pub fn execute_approve_all(
     deps: DepsMut,
