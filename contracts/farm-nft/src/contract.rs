@@ -162,6 +162,56 @@ pub fn execute_send_nft(
         .add_attribute("token_id", token_id))
 }
 
+pub fn execute_receive(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    msg: Cw721ReceiveMsg,
+) -> Result<Response, ContractError> {
+    
+    if env.contract.address != info.sender {
+        return Err(ContractError::Unauthorized {});
+    }
+
+    // check that only pack can be opened, not any ohter nft from our contract
+    if msg.token_id.clone() != "1" {
+        return Err(ContractError::Unauthorized {});
+    }   
+
+
+    let time_in_epoch_seconds = env.block.time.seconds();
+    let mut token_ids = REWARDS.load(deps.storage)?;
+    let random_number = generate_random_number(time_in_epoch_seconds, token_ids.len() as u64);
+    let token_id = token_ids.swap_remove(random_number as usize);
+    REWARDS.save(deps.storage, &token_ids)?;
+
+    //let mut messages: Vec<CosmosMsg> = Vec::new();
+    //let config = CONFIG.load(deps.storage)?;
+    // let mut token = tokens().load(deps.storage, &msg.token_id.to_string())?;
+    let contract_addr = env.contract.address.into_string();
+
+    //execute_transfer_nft(deps, env, info, sender, "2".to_string())?;
+
+    let callback = CosmosMsg::Wasm(WasmMsg::Execute {
+        contract_addr: contract_addr.clone(),
+        msg: to_binary(&ExecuteMsg::TransferNft {
+            recipient: msg.sender.to_string(),
+            token_id: token_id,
+        })?,
+        funds: vec![],
+    });
+
+    let callback2 = CosmosMsg::Wasm(WasmMsg::Execute {
+        contract_addr: contract_addr,
+        msg: to_binary(&ExecuteMsg::Burn {
+            token_id: msg.token_id,
+        })?,
+        funds: vec![],
+    });
+
+    Ok(Response::new().add_message(callback).add_message(callback2))
+}
+
 pub fn _transfer_nft(
     deps: DepsMut,
     env: &Env,
@@ -376,49 +426,6 @@ pub fn decrement_tokens(storage: &mut dyn Storage) -> StdResult<u64> {
     let val = num_tokens(storage)? - 1;
     TOKEN_COUNT.save(storage, &val)?;
     Ok(val)
-}
-
-pub fn execute_receive(
-    deps: DepsMut,
-    env: Env,
-    info: MessageInfo,
-    msg: Cw721ReceiveMsg,
-) -> Result<Response, ContractError> {
-    if env.contract.address != info.sender {
-        return Err(ContractError::Unauthorized {});
-    }
-
-    let time_in_epoch_seconds = env.block.time.seconds();
-    let mut token_ids = REWARDS.load(deps.storage)?;
-    let random_number = generate_random_number(time_in_epoch_seconds, token_ids.len() as u64);
-    let token_id = token_ids.swap_remove(random_number as usize);
-    REWARDS.save(deps.storage, &token_ids)?;
-
-    //let mut messages: Vec<CosmosMsg> = Vec::new();
-    //let config = CONFIG.load(deps.storage)?;
-    // let mut token = tokens().load(deps.storage, &msg.token_id.to_string())?;
-    let contract_addr = env.contract.address.into_string();
-
-    //execute_transfer_nft(deps, env, info, sender, "2".to_string())?;
-
-    let callback = CosmosMsg::Wasm(WasmMsg::Execute {
-        contract_addr: contract_addr.clone(),
-        msg: to_binary(&ExecuteMsg::TransferNft {
-            recipient: msg.sender.to_string(),
-            token_id: token_id,
-        })?,
-        funds: vec![],
-    });
-
-    let callback2 = CosmosMsg::Wasm(WasmMsg::Execute {
-        contract_addr: contract_addr,
-        msg: to_binary(&ExecuteMsg::Burn {
-            token_id: msg.token_id,
-        })?,
-        funds: vec![],
-    });
-
-    Ok(Response::new().add_message(callback).add_message(callback2))
 }
 
 pub fn _check_can_send(
