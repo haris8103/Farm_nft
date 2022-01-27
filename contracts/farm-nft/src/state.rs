@@ -1,5 +1,5 @@
 /// maps token_id to its level
-use cosmwasm_std::{Addr, BlockInfo, StdResult, Storage};
+use cosmwasm_std::{Addr, BlockInfo, StdResult, Storage, Uint128};
 use cw721::{ContractInfoResponse, Expiration};
 use cw_storage_plus::{Index, IndexList, IndexedMap, Item, Map, MultiIndex};
 use schemars::JsonSchema;
@@ -89,6 +89,15 @@ pub const LEVEL_DATA: Map<&str, u16> = Map::new("level_data");
 pub struct Config {
     pub minter: String,
 }
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
+pub struct RewardToken {
+    pub contract_addr: String,
+    pub mining_rate: Uint128,
+}
+
 pub const CONFIG: Item<Config> = Item::new("Config");
 pub const REWARDS: Map<String, Vec<String>> = Map::new("Rewards");
 pub const REWARD_ITEMS: Item<HashSet<String>> = Item::new("RewardItems");
+pub const USER_STAKED_COUNT: Map<String, u64> = Map::new("UserStakedCount");
+pub const REWARD_TOKEN: Map<String, RewardToken> = Map::new("RewardToken");

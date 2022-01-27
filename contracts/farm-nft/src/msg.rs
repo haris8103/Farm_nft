@@ -1,4 +1,4 @@
-use cosmwasm_std::{Addr, Binary};
+use cosmwasm_std::{Addr, Binary, Uint128};
 use cw20::Cw20ReceiveMsg;
 use cw721::{Cw721ReceiveMsg, OwnerOfResponse};
 use schemars::JsonSchema;
@@ -70,6 +70,12 @@ pub enum ExecuteMsg {
         token_id: String,
     },
     Receive(Cw20ReceiveMsg),
+
+    AddRewardToken {
+        contract_addr: String,
+        tool_name: String,
+        mining_rate: Uint128,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -149,4 +155,13 @@ pub struct AllNftInfoResponse {
     pub access: OwnerOfResponse,
     /// Data on the token itself,
     pub info: NftInfoResponse,
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum Cw721HookMsg {
+    /// Who can transfer the token
+    Stake {},
+    /// Data on the token itself,
+    OpenPack {},
 }

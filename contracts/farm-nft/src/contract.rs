@@ -1,7 +1,7 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::{
-    entry_point, to_binary, Binary, BlockInfo, CosmosMsg, Deps, DepsMut, Env, MessageInfo, Order,
-    Response, StdError, StdResult, Storage, Uint128, WasmMsg,
+    entry_point, from_binary, to_binary, Binary, BlockInfo, CosmosMsg, Deps, DepsMut, Env,
+    MessageInfo, Order, Response, StdError, StdResult, Storage, Uint128, WasmMsg,
 };
 
 use cw0::maybe_addr;
@@ -19,11 +19,12 @@ use cw_storage_plus::Bound;
 
 use crate::error::ContractError;
 use crate::msg::{
-    AllNftInfoResponse, ExecuteMsg, Extension, InstantiateMsg, MintMsg, NftInfoResponse, QueryMsg,
+    AllNftInfoResponse, Cw721HookMsg, ExecuteMsg, Extension, InstantiateMsg, MintMsg,
+    NftInfoResponse, QueryMsg,
 };
 use crate::state::{
-    increment_tokens, num_tokens, tokens, Approval, Config, TokenInfo, CONFIG, CONTRACT_INFO,
-    OPERATORS, REWARDS, REWARD_ITEMS, TOKEN_COUNT,
+    increment_tokens, num_tokens, tokens, Approval, Config, RewardToken, TokenInfo, CONFIG,
+    CONTRACT_INFO, OPERATORS, REWARDS, REWARD_ITEMS, REWARD_TOKEN, TOKEN_COUNT, USER_STAKED_COUNT,
 };
 
 // version info for migration info
@@ -79,8 +80,36 @@ pub fn execute(
         ExecuteMsg::ReceiveNft(msg) => execute_receive_cw721(deps, env, info, msg),
         ExecuteMsg::ClaimReward { token_id } => execute_claim_reward(deps, env, info, token_id),
         ExecuteMsg::Receive(msg) => execute_receive_cw20(deps, env, info, msg),
+        ExecuteMsg::AddRewardToken {
+            contract_addr,
+            tool_name,
+            mining_rate,
+        } => execute_add_reward_token(deps, env, info, contract_addr, tool_name, mining_rate),
     }
 }
+
+pub fn execute_add_reward_token(
+    deps: DepsMut,
+    _env: Env,
+    info: MessageInfo,
+    contract_addr: String,
+    tool_name: String,
+    mining_rate: Uint128,
+) -> Result<Response, ContractError> {
+    let config = CONFIG.load(deps.storage)?;
+
+    if info.sender != config.minter {
+        return Err(ContractError::Unauthorized {});
+    }
+    let reward_token = RewardToken {
+        contract_addr: contract_addr.to_string(),
+        mining_rate,
+    };
+    deps.api.addr_validate(contract_addr.as_str())?;
+    REWARD_TOKEN.save(deps.storage, tool_name, &reward_token)?;
+    Ok(Response::new().add_attribute("action", "distribution token added"))
+}
+
 pub fn execute_receive_cw20(
     deps: DepsMut,
     env: Env,
@@ -120,7 +149,7 @@ pub fn execute_mint(
 
     // create the token
     mint(deps, &env, &msg);
-    
+
     Ok(Response::new()
         .add_attribute("action", "mint")
         .add_attribute("minter", info.sender)
@@ -219,6 +248,53 @@ pub fn execute_receive_cw721(
     if env.contract.address != info.sender {
         return Err(ContractError::Unauthorized {});
     }
+    match from_binary(&msg.msg) {
+        Ok(Cw721HookMsg::Stake {}) => execute_stake(deps, env, msg),
+        Ok(Cw721HookMsg::OpenPack {}) => execute_open_pack(deps, env, msg),
+        Err(_err) => Err(ContractError::Unauthorized {}),
+    }
+}
+
+pub fn execute_stake(
+    deps: DepsMut,
+    _env: Env,
+    msg: Cw721ReceiveMsg,
+) -> Result<Response, ContractError> {
+    let token = tokens().load(deps.storage, &msg.token_id)?;
+    
+    // check that only pack can be opened, not any ohter nft from our contract
+    if token.is_reward_token {
+        return Err(ContractError::NotEligible {});
+    }
+   
+    let count =
+        if let Some(count) = USER_STAKED_COUNT.may_load(deps.storage, msg.sender.to_string())? {
+            count
+        } else {
+            0u64
+        };
+    if count > 10 {
+        return Err(ContractError::LimitReached {});
+    }
+    USER_STAKED_COUNT.save(deps.storage, msg.sender.to_string(), &(1 + count))?;
+
+    //    execute_transfer_nft(deps, env, info, contract_addr, msg.token_id);
+    // responses.push(CosmosMsg::Wasm(WasmMsg::Execute {
+    //     contract_addr: contract_addr.clone(),
+    //     msg: to_binary(&ExecuteMsg::TransferNft {
+    //         recipient: contract_addr,
+    //         token_id: msg.token_id,
+    //     })?,
+    //     funds: vec![],
+    // }));
+    Ok(Response::new())
+}
+
+pub fn execute_open_pack(
+    deps: DepsMut,
+    env: Env,
+    msg: Cw721ReceiveMsg,
+) -> Result<Response, ContractError> {
     let token = tokens().load(deps.storage, &msg.token_id)?;
     let mut responses: Vec<CosmosMsg> = vec![];
     // check that only pack can be opened, not any ohter nft from our contract
@@ -311,14 +387,22 @@ pub fn execute_claim_reward(
         return Err(ContractError::Unauthorized {});
     }
 
+    let reward_token = if let Some(reward_token) =
+        REWARD_TOKEN.may_load(deps.storage, token_info.name.to_string())?
+    {
+        reward_token
+    } else {
+        return Err(ContractError::NoRewardTokenFound {});
+    };
+
     if token_info.reward_start_time + token_info.wait_time_for_nft_reward < env.block.time.seconds()
     {
         callback.push(CosmosMsg::Wasm(WasmMsg::Execute {
             //sending reward to user
-            contract_addr: "terra15fgyuajjsw2wh7qvsslhz2j6u7g5lt02r9zul3".to_string(),
+            contract_addr: reward_token.contract_addr.to_string(),
             msg: to_binary(&Cw20ExecuteMsg::Transfer {
                 recipient: info.sender.to_string(),
-                amount: Uint128::from(2u128),
+                amount: Uint128::from(reward_token.mining_rate),
             })?,
             funds: vec![],
         }));

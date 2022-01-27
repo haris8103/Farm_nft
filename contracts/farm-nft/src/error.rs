@@ -21,6 +21,15 @@ pub enum ContractError {
 
     #[error("Not eligible")]
     NotEligible {},
+
+    #[error("Already exists")]
+    AlreadyExisits {},
+
+    #[error("No Reward Token Found")]
+    NoRewardTokenFound {},
+
+    #[error("Limit reached")]
+    LimitReached {},
 }
 
 impl From<cw721_base::ContractError> for ContractError {
