@@ -1,4 +1,4 @@
-use cosmwasm_std::{Addr, Binary, Uint128};
+use cosmwasm_std::{Addr, Binary};
 use cw20::Cw20ReceiveMsg;
 use cw721::{Cw721ReceiveMsg, OwnerOfResponse};
 use schemars::JsonSchema;
@@ -15,8 +15,6 @@ pub struct InstantiateMsg {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct MintMsg {
     pub owner: Addr,
-    /// Unique ID of the NFT
-    pub token_id: String,
     /// Identifies the asset to which this NFT represents
     pub name: String,
     /// A URI pointing to an image representing the asset
@@ -25,6 +23,12 @@ pub struct MintMsg {
     pub description: Option<String>,
     /// Custom extensions
     pub rarity: String,
+
+    pub pre_mint_tool: Option<String>,
+
+    pub minting_count: Option<u64>,
+
+    pub category: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -69,13 +73,23 @@ pub enum ExecuteMsg {
     ClaimReward {
         token_id: String,
     },
+
+    Unstake {
+        token_id: String,
+    },
+
     Receive(Cw20ReceiveMsg),
 
     AddRewardToken {
         contract_addr: String,
         tool_name: String,
-        mining_rate: Uint128,
+        mining_rate: u64,
+        mining_waiting_time: u64,
     },
+    AddCommonNftNames {
+        tool_name: String,
+    },
+    BatchMint(MintMsg),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -83,7 +97,9 @@ pub enum ExecuteMsg {
 pub enum QueryMsg {
     /// Return the owner of the given token, error if token does not exist
     /// Return type: OwnerOfResponse
-    OwnerOf { token_id: String },
+    OwnerOf {
+        token_id: String,
+    },
 
     /// Total number of tokens issued
     NumTokens {},
@@ -95,12 +111,16 @@ pub enum QueryMsg {
     /// With MetaData Extension.
     /// Returns metadata about one particular token, based on *ERC721 Metadata JSON Schema*
     /// but directly from the contract: `NftInfoResponse`
-    NftInfo { token_id: String },
+    NftInfo {
+        token_id: String,
+    },
 
     /// With MetaData Extension.
     /// Returns the result of both `NftInfo` and `OwnerOf` as one query as an optimization
     /// for clients: `AllNftInfo`
-    AllNftInfo { token_id: String },
+    AllNftInfo {
+        token_id: String,
+    },
 
     /// With Enumerable extension.
     /// Returns all tokens owned by the given address, [] if unset.
@@ -117,6 +137,10 @@ pub enum QueryMsg {
     AllTokens {
         start_after: Option<String>,
         limit: Option<u32>,
+    },
+
+    UserStakedInfo {
+        user_address: String,
     },
 }
 
@@ -164,4 +188,15 @@ pub enum Cw721HookMsg {
     Stake {},
     /// Data on the token itself,
     OpenPack {},
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum Cw20HookMsg {
+    /// Who can transfer the token
+    MintAxe {},
+    /// Data on the token itself,
+    MintFishNet {},
+
+    MintNft {},
 }

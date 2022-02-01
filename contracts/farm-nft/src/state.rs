@@ -1,5 +1,5 @@
 /// maps token_id to its level
-use cosmwasm_std::{Addr, BlockInfo, StdResult, Storage, Uint128};
+use cosmwasm_std::{Addr, BlockInfo, StdResult, Storage};
 use cw721::{ContractInfoResponse, Expiration};
 use cw_storage_plus::{Index, IndexList, IndexedMap, Item, Map, MultiIndex};
 use schemars::JsonSchema;
@@ -22,11 +22,11 @@ pub struct TokenInfo {
 
     pub rarity: String,
 
-    pub wait_time_for_nft_reward: u64,
-
     pub reward_start_time: u64,
 
-    pub is_reward_token: bool,
+    pub is_pack_token: bool,
+
+    pub pre_mint_tool: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
@@ -93,11 +93,13 @@ pub struct Config {
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
 pub struct RewardToken {
     pub contract_addr: String,
-    pub mining_rate: Uint128,
+    pub mining_rate: u64,
+    pub mining_waiting_time: u64,
 }
 
 pub const CONFIG: Item<Config> = Item::new("Config");
 pub const REWARDS: Map<String, Vec<String>> = Map::new("Rewards");
-pub const REWARD_ITEMS: Item<HashSet<String>> = Item::new("RewardItems");
-pub const USER_STAKED_COUNT: Map<String, u64> = Map::new("UserStakedCount");
+//pub const REWARD_ITEMS: Item<HashSet<String>> = Item::new("RewardItems");
+pub const USER_STAKED_INFO: Map<String, HashSet<String>> = Map::new("UserStakedInfo");
 pub const REWARD_TOKEN: Map<String, RewardToken> = Map::new("RewardToken");
+pub const NFT_NAMES: Item<Vec<String>> = Item::new("CommonNftNames");

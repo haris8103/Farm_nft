@@ -30,6 +30,9 @@ pub enum ContractError {
 
     #[error("Limit reached")]
     LimitReached {},
+
+    #[error("Time not reached")]
+    TimeNotReached {},
 }
 
 impl From<cw721_base::ContractError> for ContractError {
