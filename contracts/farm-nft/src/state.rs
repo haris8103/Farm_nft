@@ -1,5 +1,5 @@
 /// maps token_id to its level
-use cosmwasm_std::{Addr, BlockInfo, StdResult, Storage};
+use cosmwasm_std::{Addr, BlockInfo, StdResult, Storage, Uint128};
 use cw721::{ContractInfoResponse, Expiration};
 use cw_storage_plus::{Index, IndexList, IndexedMap, Item, Map, MultiIndex};
 use schemars::JsonSchema;
@@ -88,6 +88,8 @@ pub const LEVEL_DATA: Map<&str, u16> = Map::new("level_data");
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
 pub struct Config {
     pub minter: String,
+    pub food_addr: String,
+    pub team_addr: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
@@ -103,3 +105,4 @@ pub const REWARDS: Map<String, Vec<String>> = Map::new("Rewards");
 pub const USER_STAKED_INFO: Map<String, HashSet<String>> = Map::new("UserStakedInfo");
 pub const REWARD_TOKEN: Map<String, RewardToken> = Map::new("RewardToken");
 pub const NFT_NAMES: Item<Vec<String>> = Item::new("CommonNftNames");
+pub const USER_ENERGY_LEVEL: Map<String, Uint128> = Map::new("UserEnergyLevel");

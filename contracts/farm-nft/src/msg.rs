@@ -10,6 +10,9 @@ pub struct InstantiateMsg {
     pub name: String,
     /// Symbol of the NFT contract
     pub symbol: String,
+    pub food_addr: String,
+
+    pub team_addr: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -193,9 +196,9 @@ pub enum Cw721HookMsg {
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum Cw20HookMsg {
-    /// Who can transfer the token
+    RefillEnergy {},
     MintAxe {},
-    /// Data on the token itself,
+
     MintFishNet {},
 
     MintNft {},

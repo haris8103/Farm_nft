@@ -24,7 +24,8 @@ use crate::msg::{
 };
 use crate::state::{
     increment_tokens, num_tokens, tokens, Approval, Config, RewardToken, TokenInfo, CONFIG,
-    CONTRACT_INFO, NFT_NAMES, OPERATORS, REWARDS, REWARD_TOKEN, TOKEN_COUNT, USER_STAKED_INFO,
+    CONTRACT_INFO, NFT_NAMES, OPERATORS, REWARDS, REWARD_TOKEN, TOKEN_COUNT, USER_ENERGY_LEVEL,
+    USER_STAKED_INFO,
 };
 
 // version info for migration info
@@ -47,9 +48,11 @@ pub fn instantiate(
         name: msg.name,
         symbol: msg.symbol,
     };
-
+    deps.api.addr_validate(&msg.food_addr.to_string())?;
     let config = Config {
         minter: _info.sender.to_string(),
+        food_addr: msg.food_addr,
+        team_addr: msg.team_addr,
     };
     CONTRACT_INFO.save(deps.storage, &contract_info)?;
     CONFIG.save(deps.storage, &config)?;
@@ -158,13 +161,62 @@ pub fn execute_receive_cw20(
     msg: Cw20ReceiveMsg,
 ) -> Result<Response, ContractError> {
     match from_binary(&msg.msg) {
+        Ok(Cw20HookMsg::RefillEnergy {}) => execute_refill_energy(deps, env, info, msg),
         Ok(Cw20HookMsg::MintAxe {}) => execute_mint_axe(deps, env, info, msg),
         Ok(Cw20HookMsg::MintFishNet {}) => execute_mint_fist_net(deps, env, info, msg),
         Ok(Cw20HookMsg::MintNft {}) => execute_mint_nft(deps, env, info, msg),
         Err(_err) => Err(ContractError::Unauthorized {}),
     }
 }
+pub fn execute_refill_energy(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    msg: Cw20ReceiveMsg,
+) -> Result<Response, ContractError> {
+    let config = CONFIG.load(deps.storage)?;
+    if config.food_addr != info.sender {
+        return Err(ContractError::NotEligible {});
+    }
 
+    let mut responses: Vec<CosmosMsg> = vec![];
+
+    let mut user_evergy_level = USER_ENERGY_LEVEL
+        .may_load(deps.storage, msg.sender.clone())?
+        .unwrap_or_else(|| Uint128::zero());
+
+    user_evergy_level = user_evergy_level
+        + msg
+            .amount
+            .multiply_ratio(Uint128::from(3u128), Uint128::from(1u128));
+
+    USER_ENERGY_LEVEL.save(deps.storage, msg.sender.clone(), &user_evergy_level)?;
+
+    let mut amount = msg.amount;
+    let burn_amount = amount.multiply_ratio(Uint128::from(25u128), Uint128::from(100u128));
+    amount = amount - burn_amount; //75%
+
+    responses.push(CosmosMsg::Wasm(WasmMsg::Execute {
+        //sending reward to user
+        contract_addr: info.sender.to_string(),
+        msg: to_binary(&Cw20ExecuteMsg::Burn {
+            amount: burn_amount,
+        })?,
+        funds: vec![],
+    }));
+
+    responses.push(CosmosMsg::Wasm(WasmMsg::Execute {
+        //sending reward to user
+        contract_addr: info.sender.to_string(),
+        msg: to_binary(&Cw20ExecuteMsg::Transfer {
+            recipient: config.team_addr,
+            amount: burn_amount,
+        })?,
+        funds: vec![],
+    }));
+
+    Ok(Response::new())
+}
 pub fn execute_batch_mint(
     deps: DepsMut,
     env: Env,
@@ -537,9 +589,7 @@ pub fn transfer_pack_items(
         };
     let random_number = generate_random_number(time_in_epoch_seconds, token_ids.len() as u64);
     let token_id = token_ids.swap_remove(random_number as usize);
-    REWARDS
-        .save(store, category, &token_ids)
-        .unwrap();
+    REWARDS.save(store, category, &token_ids).unwrap();
 
     responses.push(CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr,
