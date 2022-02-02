@@ -13,6 +13,10 @@ pub struct InstantiateMsg {
     pub food_addr: String,
 
     pub team_addr: String,
+
+    pub market_addr: String,
+
+    pub legal_addr: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -84,7 +88,7 @@ pub enum ExecuteMsg {
     Receive(Cw20ReceiveMsg),
 
     AddRewardToken {
-        contract_addr: String,
+        item_name: String,
         tool_name: String,
         mining_rate: u64,
         mining_waiting_time: u64,
@@ -93,6 +97,13 @@ pub enum ExecuteMsg {
         tool_name: String,
     },
     BatchMint(MintMsg),
+    AddItemToken {
+        item_name: String,
+        item_token_addr: String,
+    },
+    RefillEnergy {
+        food_item_amount: u64,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -143,6 +154,13 @@ pub enum QueryMsg {
     },
 
     UserStakedInfo {
+        user_address: String,
+    },
+    UserItemBalance {
+        user_address: String,
+        item_name: String,
+    },
+    UserEnergyInfo {
         user_address: String,
     },
 }
@@ -196,10 +214,15 @@ pub enum Cw721HookMsg {
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum Cw20HookMsg {
-    RefillEnergy {},
-    MintAxe {},
+    // RefillEnergy {},
+    // MintAxe {},
 
-    MintFishNet {},
+    // MintFishNet {},
 
-    MintNft {},
+    // MintNft {},
+    Deposit {},
+    AdminDeposit {},
 }
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct MigrateMsg {}

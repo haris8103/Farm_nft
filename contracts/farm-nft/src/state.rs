@@ -90,14 +90,23 @@ pub struct Config {
     pub minter: String,
     pub food_addr: String,
     pub team_addr: String,
+    pub market_addr: String,
+    pub legal_addr: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
 pub struct RewardToken {
-    pub contract_addr: String,
+    pub item_name: String,
     pub mining_rate: u64,
     pub mining_waiting_time: u64,
 }
+
+// #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
+// pub struct UserTokenInfo {
+//     pub amount: String,
+//     pub mining_rate: u64,
+//     pub mining_waiting_time: u64,
+// }
 
 pub const CONFIG: Item<Config> = Item::new("Config");
 pub const REWARDS: Map<String, Vec<String>> = Map::new("Rewards");
@@ -106,3 +115,8 @@ pub const USER_STAKED_INFO: Map<String, HashSet<String>> = Map::new("UserStakedI
 pub const REWARD_TOKEN: Map<String, RewardToken> = Map::new("RewardToken");
 pub const NFT_NAMES: Item<Vec<String>> = Item::new("CommonNftNames");
 pub const USER_ENERGY_LEVEL: Map<String, Uint128> = Map::new("UserEnergyLevel");
+pub const USER_ITEM_AMOUNT: Map<String, Uint128> = Map::new("UserItemAmount");
+pub const ITEM_TOKEN_MAPPING: Map<String, String> = Map::new("ItemTokenMapping");
+// pub const USER_FOOD_AMOUNT: Map<String, Uint128> = Map::new("UserFoodAmount");
+// pub const USER_GOLD_AMOUNT: Map<String, Uint128> = Map::new("UserGoldAmount");
+// pub const USER_STONE_AMOUNT: Map<String, Uint128> = Map::new("UserStoneAmount");

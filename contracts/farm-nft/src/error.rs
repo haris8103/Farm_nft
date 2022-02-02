@@ -33,6 +33,15 @@ pub enum ContractError {
 
     #[error("Time not reached")]
     TimeNotReached {},
+
+    #[error("No Energy")]
+    NoEnergy {},
+
+    #[error("Not enough Energy")]
+    NotEnoughEnergy {},
+
+    #[error("Not enough Energy")]
+    InSufficientFunds {},
 }
 
 impl From<cw721_base::ContractError> for ContractError {
