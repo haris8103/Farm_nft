@@ -196,11 +196,11 @@ pub fn execute_receive_cw20(
 
 pub fn execute_deposit(
     deps: DepsMut,
-    env: Env,
+    _env: Env,
     info: MessageInfo,
     msg: Cw20ReceiveMsg,
 ) -> Result<Response, ContractError> {
-    let config = CONFIG.load(deps.storage)?;
+    // let config = CONFIG.load(deps.storage)?;
     let item_name = if let Some(item_name) =
         ITEM_TOKEN_MAPPING.may_load(deps.storage, info.sender.to_string())?
     {
@@ -219,21 +219,21 @@ pub fn execute_deposit(
     };
     user_item_amount += msg.amount;
     USER_ITEM_AMOUNT.save(deps.storage, user_item_key, &user_item_amount)?;
-    if config.minter != msg.sender {
-        return Err(ContractError::Unauthorized {});
-    }
-    let mut contract_item_key = env.contract.address.to_string();
-    contract_item_key.push_str(&item_name);
-    let mut contract_item_amount = if let Some(contract_item_amount) =
-        USER_ITEM_AMOUNT.may_load(deps.storage, contract_item_key.to_string())?
-    {
-        contract_item_amount
-    } else {
-        Uint128::zero()
-    };
-    contract_item_amount -= msg.amount;
-    USER_ITEM_AMOUNT.save(deps.storage, contract_item_key, &contract_item_amount)?;
-    Ok(Response::new())
+    // if config.minter != msg.sender {
+    //     return Err(ContractError::Unauthorized {});
+    // }
+    // let mut contract_item_key = env.contract.address.to_string();
+    // contract_item_key.push_str(&item_name);
+    // let mut contract_item_amount = if let Some(contract_item_amount) =
+    //     USER_ITEM_AMOUNT.may_load(deps.storage, contract_item_key.to_string())?
+    // {
+    //     contract_item_amount
+    // } else {
+    //     Uint128::zero()
+    // };
+    // contract_item_amount -= msg.amount;
+    // USER_ITEM_AMOUNT.save(deps.storage, contract_item_key, &contract_item_amount)?;
+     Ok(Response::new())
 }
 
 pub fn execute_admin_deposit(
