@@ -40,7 +40,7 @@ pub enum ContractError {
     #[error("Not enough Energy")]
     NotEnoughEnergy {},
 
-    #[error("Not enough Energy")]
+    #[error("Insufficient funds")]
     InSufficientFunds {},
 }
 

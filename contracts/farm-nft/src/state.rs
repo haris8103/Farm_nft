@@ -1,5 +1,5 @@
 /// maps token_id to its level
-use cosmwasm_std::{Addr, BlockInfo, StdResult, Storage, Uint128};
+use cosmwasm_std::{Addr, BlockInfo, StdResult, Storage, Uint128, Env};
 use cw721::{ContractInfoResponse, Expiration};
 use cw_storage_plus::{Index, IndexList, IndexedMap, Item, Map, MultiIndex};
 use schemars::JsonSchema;
@@ -57,6 +57,7 @@ pub fn num_tokens(storage: &dyn Storage) -> StdResult<u64> {
 pub fn increment_tokens(storage: &mut dyn Storage) -> StdResult<u64> {
     let val = num_tokens(storage)? + 1;
     TOKEN_COUNT.save(storage, &val)?;
+
     Ok(val)
 }
 
@@ -88,10 +89,10 @@ pub const LEVEL_DATA: Map<&str, u16> = Map::new("level_data");
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
 pub struct Config {
     pub minter: String,
-    pub food_addr: String,
     pub team_addr: String,
     pub market_addr: String,
     pub legal_addr: String,
+    pub burn_addr: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
@@ -101,12 +102,90 @@ pub struct RewardToken {
     pub mining_waiting_time: u64,
 }
 
+pub fn distribute_amount(
+    store: &mut dyn Storage,
+    item: String,
+    amount: Uint128,
+    config: &Config,
+    env: &Env,
+) {
+    if amount == Uint128::zero() {
+        return;
+    }
+    let burn_amount = amount.multiply_ratio(Uint128::from(25u128), Uint128::from(100u128));
+    let team_market_amount = amount.multiply_ratio(Uint128::from(10u128), Uint128::from(100u128));
+    let legal_amount = amount.multiply_ratio(Uint128::from(5u128), Uint128::from(100u128));
+    let contract_pool_amount = amount - burn_amount - team_market_amount - team_market_amount;
+    add_amount_in_item_address(
+        store,
+        config.legal_addr.to_string(),
+        item.to_string(),
+        legal_amount,
+    );
+    add_amount_in_item_address(
+        store,
+        config.team_addr.to_string(),
+        item.to_string(),
+        team_market_amount,
+    );
+    add_amount_in_item_address(
+        store,
+        config.market_addr.to_string(),
+        item.to_string(),
+        team_market_amount,
+    );
+    add_amount_in_item_address(
+        store,
+        env.contract.address.to_string(),
+        item.to_string(),
+        contract_pool_amount,
+    );
+    add_amount_in_item_address(
+        store,
+        config.burn_addr.to_string(),
+        item.to_string(),
+        burn_amount,
+    );
+}
+
+pub fn add_amount_in_item_address(
+    store: &mut dyn Storage,
+    addr: String,
+    item: String,
+    amount: Uint128,
+) {
+    let mut item_key = addr.to_string();
+    item_key.push_str(&item);
+    let mut item_amount = if let Some(item_amount) = USER_ITEM_AMOUNT
+        .may_load(store, item_key.to_string())
+        .unwrap()
+    {
+        item_amount
+    } else {
+        Uint128::zero()
+    };
+    item_amount += amount;
+    USER_ITEM_AMOUNT
+        .save(store, item_key.to_string(), &item_amount)
+        .unwrap();
+}
 // #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
 // pub struct UserTokenInfo {
 //     pub amount: String,
 //     pub mining_rate: u64,
 //     pub mining_waiting_time: u64,
 // }
+#[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
+pub struct ToolTemplate {
+    pub name: String,
+    pub description: String,
+    pub image: String,
+    pub rarity: String,
+    pub required_gwood_amount: Uint128,
+    pub required_gfood_amount: Uint128,
+    pub required_ggold_amount: Uint128,
+    pub required_gstone_amount: Uint128,
+}
 
 pub const CONFIG: Item<Config> = Item::new("Config");
 pub const REWARDS: Map<String, Vec<String>> = Map::new("Rewards");
@@ -116,7 +195,7 @@ pub const REWARD_TOKEN: Map<String, RewardToken> = Map::new("RewardToken");
 pub const NFT_NAMES: Item<Vec<String>> = Item::new("CommonNftNames");
 pub const USER_ENERGY_LEVEL: Map<String, Uint128> = Map::new("UserEnergyLevel");
 pub const USER_ITEM_AMOUNT: Map<String, Uint128> = Map::new("UserItemAmount");
-pub const ITEM_TOKEN_MAPPING: Map<String, String> = Map::new("ItemTokenMapping");
-// pub const USER_FOOD_AMOUNT: Map<String, Uint128> = Map::new("UserFoodAmount");
-// pub const USER_GOLD_AMOUNT: Map<String, Uint128> = Map::new("UserGoldAmount");
-// pub const USER_STONE_AMOUNT: Map<String, Uint128> = Map::new("UserStoneAmount");
+pub const ITEM_TOKEN_MAPPING: Map<String, String> = Map::new("ItemTokenMapping"); //key will be address and value will be item name
+pub const TOKEN_ITEM_MAPPING: Map<String, String> = Map::new("TokenItemMapping"); //key will be item name and value will be address
+pub const LAST_GEN_TOKEN_ID: Item<u64> = Item::new("LastGenTokenId");
+pub const TOOL_TEMPLATE_MAP: Map<String, ToolTemplate> = Map::new("ToolTemplateMap");

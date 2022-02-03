@@ -1,4 +1,4 @@
-use cosmwasm_std::{Addr, Binary};
+use cosmwasm_std::{Addr, Binary, Uint128};
 use cw20::Cw20ReceiveMsg;
 use cw721::{Cw721ReceiveMsg, OwnerOfResponse};
 use schemars::JsonSchema;
@@ -10,13 +10,14 @@ pub struct InstantiateMsg {
     pub name: String,
     /// Symbol of the NFT contract
     pub symbol: String,
-    pub food_addr: String,
 
     pub team_addr: String,
 
     pub market_addr: String,
 
     pub legal_addr: String,
+
+    pub burn_addr: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -35,9 +36,8 @@ pub struct MintMsg {
 
     pub minting_count: Option<u64>,
 
-    pub category: String,
+    pub tool_type: String, //common tool name
 }
-
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct BoostMsg {
     pub token_ids: Vec<String>,
@@ -104,6 +104,14 @@ pub enum ExecuteMsg {
     RefillEnergy {
         food_item_amount: u64,
     },
+    Withdraw {
+        item_name: String,
+        amount: Uint128,
+    },
+    AddToolTemplate(ToolTemplateMsg),
+    MintCommonNft {
+        tool_type: String,
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -224,5 +232,18 @@ pub enum Cw20HookMsg {
     AdminDeposit {},
 }
 
+#[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
+#[serde(rename_all = "snake_case")]
+pub struct ToolTemplateMsg {
+    pub tool_type: String,
+    pub name: String,
+    pub description: String,
+    pub image: String,
+    pub rarity: String,
+    pub required_gwood_amount: Uint128,
+    pub required_gfood_amount: Uint128,
+    pub required_ggold_amount: Uint128,
+    pub required_gstone_amount: Uint128,
+}
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct MigrateMsg {}
