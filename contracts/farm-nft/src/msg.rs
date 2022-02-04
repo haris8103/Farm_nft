@@ -111,7 +111,10 @@ pub enum ExecuteMsg {
     AddToolTemplate(ToolTemplateMsg),
     MintCommonNft {
         tool_type: String,
-    }
+    },
+    UpgradeNft {
+        token_ids: Vec<String>,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

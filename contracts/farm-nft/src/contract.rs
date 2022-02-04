@@ -11,25 +11,23 @@ use cw721::{
     ContractInfoResponse, Cw721ReceiveMsg, Expiration, NumTokensResponse, OwnerOfResponse,
     TokensResponse,
 };
-use std::collections::HashSet;
+use std::collections::{HashSet};
 //use cw721_base::contract::{execute_send_nft, execute_transfer_nft};
 
 //use cw721_base::ContractError; // TODO use custom errors instead
 use cw_storage_plus::Bound;
 
 use crate::error::ContractError;
+use crate::mint::{execute_mint_common_nft, execute_mint_special_nft};
 use crate::msg::{
     AllNftInfoResponse, Cw20HookMsg, Cw721HookMsg, ExecuteMsg, Extension, InstantiateMsg,
     MigrateMsg, MintMsg, NftInfoResponse, QueryMsg, ToolTemplateMsg,
 };
 use crate::state::{
     increment_tokens, num_tokens, tokens, Approval, Config, RewardToken, TokenInfo, ToolTemplate,
-    CONFIG, CONTRACT_INFO, ITEM_TOKEN_MAPPING, LAST_GEN_TOKEN_ID, NFT_NAMES, OPERATORS, REWARDS,
-    REWARD_TOKEN, TOKEN_COUNT, TOKEN_ITEM_MAPPING, TOOL_TEMPLATE_MAP, USER_ENERGY_LEVEL,
-    USER_ITEM_AMOUNT, USER_STAKED_INFO,
-};
-use crate::mint::{
-    execute_mint_common_nft,
+    CONFIG, CONTRACT_INFO, ITEM_TOKEN_MAPPING, LAST_GEN_TOKEN_ID, NFT_NAMES, OPERATORS,
+    RARITY_TYPES, REWARDS, REWARD_TOKEN, TOKEN_COUNT, TOKEN_ITEM_MAPPING, TOOL_TEMPLATE_MAP,
+    USER_ENERGY_LEVEL, USER_ITEM_AMOUNT, USER_STAKED_INFO,
 };
 
 // version info for migration info
@@ -59,10 +57,15 @@ pub fn instantiate(
         legal_addr: msg.legal_addr,
         burn_addr: msg.burn_addr,
     };
+    
     CONTRACT_INFO.save(deps.storage, &contract_info)?;
     CONFIG.save(deps.storage, &config)?;
     NFT_NAMES.save(deps.storage, &vec![])?;
     LAST_GEN_TOKEN_ID.save(deps.storage, &0u64)?;
+    RARITY_TYPES.save(deps.storage,"Common".to_string(), &"Uncommon".to_string())?;
+    RARITY_TYPES.save(deps.storage,"Uncommon".to_string(), &"Rare".to_string())?;
+    RARITY_TYPES.save(deps.storage,"Rare".to_string(), &"Legendary".to_string())?;
+    RARITY_TYPES.save(deps.storage,"Legendary".to_string(), &"Mythic".to_string())?;
     //REWARD_ITEMS.save(deps.storage, &HashSet::<String>::new())?;
     Ok(Response::default())
 }
@@ -121,7 +124,13 @@ pub fn execute(
             execute_withdraw(deps, env, info, item_name, amount)
         }
         ExecuteMsg::AddToolTemplate(msg) => execute_add_tool_template(deps, env, info, msg),
-        ExecuteMsg::MintCommonNft{tool_type} => execute_mint_common_nft(deps, env, info, tool_type),
+        ExecuteMsg::MintCommonNft { tool_type } => {
+            execute_mint_common_nft(deps, env, info, tool_type)
+        }
+
+        ExecuteMsg::UpgradeNft { token_ids } => {
+            execute_mint_special_nft(deps, env, info, token_ids)
+        }
     }
 }
 
@@ -132,20 +141,22 @@ fn execute_add_tool_template(
     msg: ToolTemplateMsg,
 ) -> Result<Response, ContractError> {
     let config = CONFIG.load(deps.storage)?;
-    if info.sender.to_string() != config.minter {
+    if info.sender != config.minter {
         return Err(ContractError::Unauthorized {});
     }
     let tool_template = ToolTemplate {
         name: msg.name,
         description: msg.description,
         image: msg.image,
-        rarity: msg.rarity,
+        rarity: msg.rarity.to_string(),
         required_gwood_amount: msg.required_gwood_amount,
         required_gfood_amount: msg.required_gfood_amount,
         required_ggold_amount: msg.required_ggold_amount,
         required_gstone_amount: msg.required_gstone_amount,
     };
-    TOOL_TEMPLATE_MAP.save(deps.storage, msg.tool_type, &tool_template)?;
+    let mut template_key = msg.tool_type;
+    template_key.push_str(&msg.rarity);
+    TOOL_TEMPLATE_MAP.save(deps.storage, template_key, &tool_template)?;
     Ok(Response::default())
 }
 
@@ -158,7 +169,7 @@ pub fn execute_withdraw(
 ) -> Result<Response, ContractError> {
     let mut user_item_key = info.sender.to_string();
 
-    user_item_key.push_str(&item_name.to_string());
+    user_item_key.push_str(&item_name);
 
     let mut user_item_amount = if let Some(user_item_amount) =
         USER_ITEM_AMOUNT.may_load(deps.storage, user_item_key.to_string())?
@@ -170,13 +181,12 @@ pub fn execute_withdraw(
     if user_item_amount < amount {
         return Err(ContractError::InSufficientFunds {});
     }
-    let token_addr = if let Some(token_addr) =
-        ITEM_TOKEN_MAPPING.may_load(deps.storage, item_name.to_string())?
-    {
-        token_addr
-    } else {
-        return Err(ContractError::NotFound {});
-    };
+    let token_addr =
+        if let Some(token_addr) = ITEM_TOKEN_MAPPING.may_load(deps.storage, item_name)? {
+            token_addr
+        } else {
+            return Err(ContractError::NotFound {});
+        };
     let response = CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr: token_addr,
         msg: to_binary(&Cw20ExecuteMsg::Transfer {
@@ -423,11 +433,7 @@ pub fn execute_refill_energy(
             Uint128::zero()
         };
     legal_item_amount += legal_amount;
-    USER_ITEM_AMOUNT.save(
-        deps.storage,
-        config.legal_addr.to_string(),
-        &legal_item_amount,
-    )?;
+    USER_ITEM_AMOUNT.save(deps.storage, config.legal_addr, &legal_item_amount)?;
 
     let mut contract_item_key = env.contract.address.to_string();
     contract_item_key.push_str("gfood");
@@ -510,6 +516,7 @@ pub fn mint(store: &mut dyn Storage, env: &Env, msg: &MintMsg) -> u64 {
         reward_start_time: env.block.time.seconds(),
         is_pack_token: true,
         pre_mint_tool: msg.pre_mint_tool.clone().unwrap_or_else(|| "".to_string()),
+        tool_type: msg.tool_type.to_string(),
     };
     increment_tokens(store).unwrap();
     let last_gen_token_id = LAST_GEN_TOKEN_ID.load(store).unwrap();
@@ -690,10 +697,10 @@ pub fn execute_open_pack(
     );
     let mut message: String = String::new();
     let mut number = 0;
+    let time_in_epoch_seconds = env.clone().block.time.nanos();
+    let mut random_number = generate_random_number(time_in_epoch_seconds, set.len() as u64);
     while number < 3 {
-        let time_in_epoch_seconds = env.clone().block.time.nanos();
-        let random_number = generate_random_number(time_in_epoch_seconds, set.len() as u64);
-        message.push_str(" ");
+        message.push(' ');
         message.push_str((number + 1).to_string().as_str());
         message.push_str(": ");
         message.push_str(env.clone().block.time.nanos().to_string().as_str());
@@ -707,6 +714,7 @@ pub fn execute_open_pack(
             contract_addr.clone(),
         );
         number += 1;
+        random_number = generate_random_number(time_in_epoch_seconds/random_number, set.len() as u64);
     }
 
     responses.push(CosmosMsg::Wasm(WasmMsg::Execute {
@@ -1023,14 +1031,17 @@ fn execute_burn(
 ) -> Result<Response, ContractError> {
     let token = tokens().load(deps.storage, &token_id)?;
     _check_can_send(deps.as_ref(), &env, &info, &token)?;
-
-    tokens().remove(deps.storage, &token_id)?;
-    decrement_tokens(deps.storage)?;
+    burn(deps.storage, token_id.to_string());
 
     Ok(Response::new()
         .add_attribute("action", "burn")
         .add_attribute("sender", info.sender)
         .add_attribute("token_id", token_id))
+}
+
+pub fn burn(store: &mut dyn Storage, token_id: String) {
+    tokens().remove(store, &token_id).unwrap();
+    decrement_tokens(store).unwrap();
 }
 
 pub fn decrement_tokens(storage: &mut dyn Storage) -> StdResult<u64> {
@@ -1117,7 +1128,7 @@ fn query_user_item_balance(
     user_address: String,
     item_name: String,
 ) -> StdResult<Uint128> {
-    let mut user_item_key = user_address.to_string();
+    let mut user_item_key = user_address;
     user_item_key.push_str(&item_name);
     if let Some(amount) = USER_ITEM_AMOUNT.may_load(deps.storage, user_item_key)? {
         Ok(amount)

@@ -1,10 +1,10 @@
 /// maps token_id to its level
-use cosmwasm_std::{Addr, BlockInfo, StdResult, Storage, Uint128, Env};
+use cosmwasm_std::{Addr, BlockInfo, Env, StdResult, Storage, Uint128};
 use cw721::{ContractInfoResponse, Expiration};
 use cw_storage_plus::{Index, IndexList, IndexedMap, Item, Map, MultiIndex};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{ HashSet};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct TokenInfo {
@@ -27,6 +27,8 @@ pub struct TokenInfo {
     pub is_pack_token: bool,
 
     pub pre_mint_tool: String,
+
+    pub tool_type: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
@@ -140,12 +142,7 @@ pub fn distribute_amount(
         item.to_string(),
         contract_pool_amount,
     );
-    add_amount_in_item_address(
-        store,
-        config.burn_addr.to_string(),
-        item.to_string(),
-        burn_amount,
-    );
+    add_amount_in_item_address(store, config.burn_addr.to_string(), item, burn_amount);
 }
 
 pub fn add_amount_in_item_address(
@@ -154,7 +151,7 @@ pub fn add_amount_in_item_address(
     item: String,
     amount: Uint128,
 ) {
-    let mut item_key = addr.to_string();
+    let mut item_key = addr;
     item_key.push_str(&item);
     let mut item_amount = if let Some(item_amount) = USER_ITEM_AMOUNT
         .may_load(store, item_key.to_string())
@@ -186,7 +183,7 @@ pub struct ToolTemplate {
     pub required_ggold_amount: Uint128,
     pub required_gstone_amount: Uint128,
 }
-
+pub const RARITY_TYPES: Map<String, String> = Map::new("Rarities");
 pub const CONFIG: Item<Config> = Item::new("Config");
 pub const REWARDS: Map<String, Vec<String>> = Map::new("Rewards");
 //pub const REWARD_ITEMS: Item<HashSet<String>> = Item::new("RewardItems");
