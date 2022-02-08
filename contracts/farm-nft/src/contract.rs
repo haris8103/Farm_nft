@@ -897,6 +897,12 @@ pub fn execute_open_pack(
 
     let set: Vec<String> = NFT_NAMES.may_load(deps.storage)?.unwrap();
     let contract_addr = env.clone().contract.address.into_string();
+    let mut result: u64 = 0u64;
+    let user_addr_bytes = msg.clone().sender.into_bytes();
+    for user_addr_byte in user_addr_bytes {
+        result=result + user_addr_byte as u64;
+    }
+    let number_to_add = result + msg.clone().token_id.parse::<u64>().unwrap();
     transfer_pack_items(
         deps.storage,
         env.clone(),
@@ -904,11 +910,15 @@ pub fn execute_open_pack(
         &msg,
         &mut responses,
         contract_addr.clone(),
+        number_to_add,
     );
     let mut message: String = String::new();
     let mut number = 0;
     let time_in_epoch_seconds = env.block.time.nanos();
-    let mut random_number = generate_random_number(time_in_epoch_seconds, set.len() as u64);
+   
+    
+
+    let mut random_number = generate_random_number(time_in_epoch_seconds+number_to_add, set.len() as u64);
     while number < 3 {
         message.push(' ');
         message.push_str((number + 1).to_string().as_str());
@@ -922,10 +932,11 @@ pub fn execute_open_pack(
             &msg,
             &mut responses,
             contract_addr.clone(),
+            number_to_add,
         );
         number += 1;
         random_number =
-            generate_random_number(time_in_epoch_seconds / random_number, set.len() as u64);
+            generate_random_number(time_in_epoch_seconds * number_to_add / random_number, set.len() as u64);
     }
 
     responses.push(CosmosMsg::Wasm(WasmMsg::Execute {
@@ -948,15 +959,16 @@ pub fn transfer_pack_items(
     msg: &Cw721ReceiveMsg,
     responses: &mut Vec<CosmosMsg>,
     contract_addr: String,
+    number_to_add: u64,
 ) {
-    let time_in_epoch_seconds = env.block.time.nanos();
+    let time_in_epoch_seconds = env.block.time.nanos() + number_to_add;
     let mut token_ids =
         if let Some(token_ids) = REWARDS.may_load(store, tool_type.to_string()).unwrap() {
             token_ids
         } else {
             vec![]
         };
-    let random_number = generate_random_number(time_in_epoch_seconds, token_ids.len() as u64);
+    let random_number = generate_random_number(time_in_epoch_seconds + token_ids.len() as u64 , token_ids.len() as u64);
     let token_id = token_ids.swap_remove(random_number as usize);
     REWARDS.save(store, tool_type, &token_ids).unwrap();
 
