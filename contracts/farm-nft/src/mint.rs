@@ -27,8 +27,6 @@ pub fn execute_mint_common_nft(
     let msg = MintMsg {
         owner: deps.api.addr_validate(&info.sender.to_string())?,
         name: tool_template.name,
-        description: Some(tool_template.description),
-        image: tool_template.image,
         rarity: tool_template.rarity,
         pre_mint_tool: None,
         minting_count: None,
@@ -104,13 +102,15 @@ pub fn execute_mint_special_nft(
         return Err(ContractError::NotEligible {});
     }
 
-    
     for token_id in token_ids.iter() {
         let token = if let Some(token) = tokens().may_load(deps.storage, token_id)? {
             token
         } else {
             return Err(ContractError::NotFound {});
         };
+        let mut template_key = token.tool_type.to_string();
+        template_key.push_str(token.rarity.to_string().as_str());
+
         if token_rarity.is_empty() {
             token_rarity.push_str(&token.rarity);
         } else if token_rarity != token.rarity {
@@ -124,12 +124,12 @@ pub fn execute_mint_special_nft(
         _check_can_send(deps.as_ref(), &env, &info, &token)?;
         burn(deps.storage, token_id.to_string());
     }
-    let upgraded_token_rarity = if let Some(upgraded_token_rarity) = RARITY_TYPES.may_load(deps.storage, token_rarity)?
-    {
-        upgraded_token_rarity
-    } else {
-        return Err(ContractError::NotFound {});
-    };
+    let upgraded_token_rarity =
+        if let Some(upgraded_token_rarity) = RARITY_TYPES.may_load(deps.storage, token_rarity)? {
+            upgraded_token_rarity
+        } else {
+            return Err(ContractError::NotFound {});
+        };
     let mut template_key = tool_type.to_string();
     template_key.push_str(&upgraded_token_rarity);
     let tool_template = if let Some(tool_template) =
@@ -142,8 +142,6 @@ pub fn execute_mint_special_nft(
     let msg = MintMsg {
         owner: deps.api.addr_validate(&info.sender.to_string())?,
         name: tool_template.name,
-        description: Some(tool_template.description),
-        image: tool_template.image,
         rarity: tool_template.rarity,
         pre_mint_tool: None,
         minting_count: None,

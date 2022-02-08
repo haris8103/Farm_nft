@@ -1,17 +1,17 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::{
     entry_point, from_binary, to_binary, Binary, BlockInfo, CosmosMsg, Deps, DepsMut, Env,
-    MessageInfo, Order, Response, StdError, StdResult, Storage, Uint128, WasmMsg,
+    MessageInfo, Order, QueryRequest, Response, StdError, StdResult, Storage, Uint128, WasmMsg,
+    WasmQuery,
 };
-
 use cw0::maybe_addr;
 use cw2::set_contract_version;
-use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
+use cw20::{BalanceResponse as Cw20BalanceResponse, Cw20ExecuteMsg, Cw20QueryMsg, Cw20ReceiveMsg};
 use cw721::{
     ContractInfoResponse, Cw721ReceiveMsg, Expiration, NumTokensResponse, OwnerOfResponse,
     TokensResponse,
 };
-use std::collections::{HashSet};
+use std::collections::HashSet;
 //use cw721_base::contract::{execute_send_nft, execute_transfer_nft};
 
 //use cw721_base::ContractError; // TODO use custom errors instead
@@ -33,7 +33,7 @@ use crate::state::{
 // version info for migration info
 const CONTRACT_NAME: &str = "crates.io:loop-nft";
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
-const STAKE_LIMIT: u64 = 20;
+//const STAKE_LIMIT: u64 = 20;
 // used for limiting queries
 const DEFAULT_LIMIT: u32 = 10;
 const MAX_LIMIT: u32 = 30;
@@ -41,7 +41,7 @@ const MAX_LIMIT: u32 = 30;
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn instantiate(
     deps: DepsMut,
-    _env: Env,
+    env: Env,
     _info: MessageInfo,
     msg: InstantiateMsg,
 ) -> StdResult<Response> {
@@ -50,23 +50,26 @@ pub fn instantiate(
         name: msg.name,
         symbol: msg.symbol,
     };
+
     let config = Config {
         minter: _info.sender.to_string(),
         team_addr: msg.team_addr,
         market_addr: msg.market_addr,
         legal_addr: msg.legal_addr,
         burn_addr: msg.burn_addr,
+        stake_limit: msg.stake_limit,
+        durability_start_time: env.block.time.seconds() + msg.durability_from_start_time,
+        reserve_addr: msg.reserve_addr,
     };
-    
+
     CONTRACT_INFO.save(deps.storage, &contract_info)?;
     CONFIG.save(deps.storage, &config)?;
     NFT_NAMES.save(deps.storage, &vec![])?;
     LAST_GEN_TOKEN_ID.save(deps.storage, &0u64)?;
-    RARITY_TYPES.save(deps.storage,"Common".to_string(), &"Uncommon".to_string())?;
-    RARITY_TYPES.save(deps.storage,"Uncommon".to_string(), &"Rare".to_string())?;
-    RARITY_TYPES.save(deps.storage,"Rare".to_string(), &"Legendary".to_string())?;
-    RARITY_TYPES.save(deps.storage,"Legendary".to_string(), &"Mythic".to_string())?;
-    //REWARD_ITEMS.save(deps.storage, &HashSet::<String>::new())?;
+    RARITY_TYPES.save(deps.storage, "Common".to_string(), &"Uncommon".to_string())?;
+    RARITY_TYPES.save(deps.storage, "Uncommon".to_string(), &"Rare".to_string())?;
+    RARITY_TYPES.save(deps.storage, "Rare".to_string(), &"Legendary".to_string())?;
+    RARITY_TYPES.save(deps.storage, "Legendary".to_string(), &"Mythic".to_string())?;
     Ok(Response::default())
 }
 
@@ -131,7 +134,195 @@ pub fn execute(
         ExecuteMsg::UpgradeNft { token_ids } => {
             execute_mint_special_nft(deps, env, info, token_ids)
         }
+        ExecuteMsg::UpdateConfig {
+            team_addr,
+            market_addr,
+            legal_addr,
+            burn_addr,
+            stake_limit,
+            durability_from_start_time,
+            reserve_addr,
+        } => execute_update_config(
+            deps,
+            info,
+            team_addr,
+            market_addr,
+            legal_addr,
+            burn_addr,
+            stake_limit,
+            durability_from_start_time,
+            reserve_addr,
+        ),
+
+        ExecuteMsg::TransferReserveAmount {} => {
+            execute_transfer_amount_to_reserve_account(deps, info, env)
+        }
     }
+}
+
+fn execute_update_config(
+    deps: DepsMut,
+    info: MessageInfo,
+    team_addr: Option<String>,
+    market_addr: Option<String>,
+    legal_addr: Option<String>,
+    burn_addr: Option<String>,
+    stake_limit: Option<u64>,
+    durability_from_start_time: Option<u64>,
+    reserve_addr: Option<String>,
+) -> Result<Response, ContractError> {
+    let mut config = CONFIG.load(deps.storage)?;
+    if config.minter != info.sender {
+        return Err(ContractError::Unauthorized {});
+    }
+    if team_addr.is_some() {
+        config.team_addr = team_addr.unwrap();
+    }
+    if market_addr.is_some() {
+        config.market_addr = market_addr.unwrap();
+    }
+    if legal_addr.is_some() {
+        config.legal_addr = legal_addr.unwrap();
+    }
+    if burn_addr.is_some() {
+        config.burn_addr = burn_addr.unwrap();
+    }
+    if stake_limit.is_some() {
+        config.stake_limit = stake_limit.unwrap();
+    }
+    if durability_from_start_time.is_some() {
+        config.durability_start_time += durability_from_start_time.unwrap();
+    }
+    if reserve_addr.is_some() {
+        config.reserve_addr = reserve_addr.unwrap();
+    }
+    CONFIG.save(deps.storage, &config)?;
+    Ok(Response::new())
+}
+
+fn execute_transfer_amount_to_reserve_account(
+    deps: DepsMut,
+    info: MessageInfo,
+    env: Env,
+) -> Result<Response, ContractError> {
+    let config = CONFIG.load(deps.storage)?;
+    if config.minter != info.sender {
+        return Err(ContractError::Unauthorized {});
+    }
+    let mut responses: Vec<CosmosMsg> = vec![];
+
+    let mut user_address = env.contract.address.to_string();
+    user_address.push_str("gWood");
+    if let Some(contract_pool_amount) =
+        USER_ITEM_AMOUNT.may_load(deps.storage, user_address.to_string())?
+    {
+        let token_addr = if let Some(token_addr) =
+            ITEM_TOKEN_MAPPING.may_load(deps.storage, "gWood".to_string())?
+        {
+            token_addr
+        } else {
+            return Err(ContractError::NotFound {});
+        };
+        responses.push(CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr: token_addr,
+            msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                recipient: config.reserve_addr.to_string(),
+                amount: contract_pool_amount.clone(),
+            })
+            .unwrap(),
+            funds: vec![],
+        }));
+        contract_pool_amount
+    } else {
+        Uint128::zero()
+    };
+
+    USER_ITEM_AMOUNT.save(deps.storage, "gWood".to_string(), &Uint128::zero())?;
+
+    let mut user_address = env.contract.address.to_string();
+    user_address.push_str("gFood");
+    if let Some(contract_pool_amount) =
+        USER_ITEM_AMOUNT.may_load(deps.storage, user_address.to_string())?
+    {
+        let token_addr = if let Some(token_addr) =
+            ITEM_TOKEN_MAPPING.may_load(deps.storage, "gFood".to_string())?
+        {
+            token_addr
+        } else {
+            return Err(ContractError::NotFound {});
+        };
+        responses.push(CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr: token_addr,
+            msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                recipient: config.reserve_addr.to_string(),
+                amount: contract_pool_amount.clone(),
+            })
+            .unwrap(),
+            funds: vec![],
+        }));
+        contract_pool_amount
+    } else {
+        Uint128::zero()
+    };
+
+    USER_ITEM_AMOUNT.save(deps.storage, "gFood".to_string(), &Uint128::zero())?;
+
+    let mut user_address = env.contract.address.to_string();
+    user_address.push_str("gGold");
+    if let Some(contract_pool_amount) =
+        USER_ITEM_AMOUNT.may_load(deps.storage, user_address.to_string())?
+    {
+        let token_addr = if let Some(token_addr) =
+            ITEM_TOKEN_MAPPING.may_load(deps.storage, "gGold".to_string())?
+        {
+            token_addr
+        } else {
+            return Err(ContractError::NotFound {});
+        };
+        responses.push(CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr: token_addr,
+            msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                recipient: config.reserve_addr.to_string(),
+                amount: contract_pool_amount.clone(),
+            })
+            .unwrap(),
+            funds: vec![],
+        }));
+        contract_pool_amount
+    } else {
+        Uint128::zero()
+    };
+
+    USER_ITEM_AMOUNT.save(deps.storage, "gGold".to_string(), &Uint128::zero())?;
+
+    let mut user_address = env.contract.address.to_string();
+    user_address.push_str("gStone");
+    if let Some(contract_pool_amount) =
+        USER_ITEM_AMOUNT.may_load(deps.storage, user_address.to_string())?
+    {
+        let token_addr = if let Some(token_addr) =
+            ITEM_TOKEN_MAPPING.may_load(deps.storage, "gStone".to_string())?
+        {
+            token_addr
+        } else {
+            return Err(ContractError::NotFound {});
+        };
+        responses.push(CosmosMsg::Wasm(WasmMsg::Execute {
+            contract_addr: token_addr,
+            msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                recipient: config.reserve_addr.to_string(),
+                amount: contract_pool_amount.clone(),
+            })
+            .unwrap(),
+            funds: vec![],
+        }));
+        contract_pool_amount
+    } else {
+        Uint128::zero()
+    };
+
+    USER_ITEM_AMOUNT.save(deps.storage, "gStone".to_string(), &Uint128::zero())?;
+    Ok(Response::new().add_messages(responses))
 }
 
 fn execute_add_tool_template(
@@ -153,6 +344,7 @@ fn execute_add_tool_template(
         required_gfood_amount: msg.required_gfood_amount,
         required_ggold_amount: msg.required_ggold_amount,
         required_gstone_amount: msg.required_gstone_amount,
+        durability: msg.durability,
     };
     let mut template_key = msg.tool_type;
     template_key.push_str(&msg.rarity);
@@ -506,17 +698,22 @@ pub fn execute_mint(
 }
 
 pub fn mint(store: &mut dyn Storage, env: &Env, msg: &MintMsg) -> u64 {
+    let mut template_key = msg.tool_type.to_string();
+    template_key.push_str(msg.rarity.to_string().as_str());
+    let tool_template = TOOL_TEMPLATE_MAP
+        .load(store, template_key.to_string())
+        .unwrap();
+
     let mut token = TokenInfo {
+        name: msg.name.to_string(),
         owner: msg.owner.clone(),
         approvals: vec![],
-        name: msg.name.to_string(),
-        description: msg.description.clone().unwrap_or_default(),
-        image: msg.image.to_string(),
         rarity: msg.rarity.to_string(),
         reward_start_time: env.block.time.seconds(),
         is_pack_token: true,
         pre_mint_tool: msg.pre_mint_tool.clone().unwrap_or_else(|| "".to_string()),
         tool_type: msg.tool_type.to_string(),
+        durability: tool_template.durability,
     };
     increment_tokens(store).unwrap();
     let last_gen_token_id = LAST_GEN_TOKEN_ID.load(store).unwrap();
@@ -524,7 +721,7 @@ pub fn mint(store: &mut dyn Storage, env: &Env, msg: &MintMsg) -> u64 {
     LAST_GEN_TOKEN_ID.save(store, &new_toke_id).unwrap();
     if msg.owner == env.contract.address {
         let mut token_ids =
-            if let Some(token_ids) = REWARDS.may_load(store, msg.name.to_string()).unwrap() {
+            if let Some(token_ids) = REWARDS.may_load(store, msg.tool_type.to_string()).unwrap() {
                 token_ids
             } else {
                 vec![]
@@ -610,11 +807,23 @@ pub fn execute_stake(
     env: Env,
     msg: Cw721ReceiveMsg,
 ) -> Result<Response, ContractError> {
+    let config = CONFIG.load(deps.storage)?;
     let mut token = tokens().load(deps.storage, &msg.token_id)?;
 
     // check that only pack can be opened, not any ohter nft from our contract
     if token.is_pack_token {
         return Err(ContractError::NotEligible {});
+    }
+
+    if USER_ENERGY_LEVEL
+        .may_load(deps.storage, msg.sender.to_string())?
+        .is_none()
+    {
+        USER_ENERGY_LEVEL.save(
+            deps.storage,
+            msg.sender.to_string(),
+            &Uint128::from(200u128),
+        )?;
     }
 
     let mut stake_info = if let Some(stake_info) =
@@ -624,7 +833,8 @@ pub fn execute_stake(
     } else {
         HashSet::<String>::new()
     };
-    if stake_info.len() as u64 > STAKE_LIMIT {
+
+    if stake_info.len() as u64 > config.stake_limit {
         return Err(ContractError::LimitReached {});
     }
 
@@ -697,7 +907,7 @@ pub fn execute_open_pack(
     );
     let mut message: String = String::new();
     let mut number = 0;
-    let time_in_epoch_seconds = env.clone().block.time.nanos();
+    let time_in_epoch_seconds = env.block.time.nanos();
     let mut random_number = generate_random_number(time_in_epoch_seconds, set.len() as u64);
     while number < 3 {
         message.push(' ');
@@ -714,7 +924,8 @@ pub fn execute_open_pack(
             contract_addr.clone(),
         );
         number += 1;
-        random_number = generate_random_number(time_in_epoch_seconds/random_number, set.len() as u64);
+        random_number =
+            generate_random_number(time_in_epoch_seconds / random_number, set.len() as u64);
     }
 
     responses.push(CosmosMsg::Wasm(WasmMsg::Execute {
@@ -733,21 +944,21 @@ pub fn execute_open_pack(
 pub fn transfer_pack_items(
     store: &mut dyn Storage,
     env: Env,
-    category: String,
+    tool_type: String,
     msg: &Cw721ReceiveMsg,
     responses: &mut Vec<CosmosMsg>,
     contract_addr: String,
 ) {
     let time_in_epoch_seconds = env.block.time.nanos();
     let mut token_ids =
-        if let Some(token_ids) = REWARDS.may_load(store, category.to_string()).unwrap() {
+        if let Some(token_ids) = REWARDS.may_load(store, tool_type.to_string()).unwrap() {
             token_ids
         } else {
             vec![]
         };
     let random_number = generate_random_number(time_in_epoch_seconds, token_ids.len() as u64);
     let token_id = token_ids.swap_remove(random_number as usize);
-    REWARDS.save(store, category, &token_ids).unwrap();
+    REWARDS.save(store, tool_type, &token_ids).unwrap();
 
     responses.push(CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr,
@@ -800,11 +1011,13 @@ pub fn execute_claim_reward(
     info: MessageInfo,
     token_id: String,
 ) -> Result<Response, ContractError> {
+    let config = CONFIG.load(deps.storage)?;
     let mut token_info = if let Some(token_info) = tokens().may_load(deps.storage, &token_id)? {
         token_info
     } else {
         return Err(ContractError::NotFound {});
     };
+
     let mut user_energy_level = if let Some(user_energy_level) =
         USER_ENERGY_LEVEL.may_load(deps.storage, info.sender.to_string())?
     {
@@ -848,6 +1061,10 @@ pub fn execute_claim_reward(
         } else {
             Uint128::zero()
         };
+
+        if config.durability_start_time < env.block.time.seconds() {
+            token_info.durability -= 1;
+        }
 
         user_item_amount += Uint128::from(reward_token.mining_rate);
         USER_ITEM_AMOUNT.save(deps.storage, user_item_key.to_string(), &user_item_amount)?;
@@ -1110,6 +1327,12 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
         QueryMsg::UserEnergyInfo { user_address } => {
             to_binary(&query_user_energy_info(deps, user_address)?)
         }
+        QueryMsg::UserItemInfo { user_address } => {
+            to_binary(&query_user_item_info(deps, user_address)?)
+        }
+        QueryMsg::UserTokenBalance { user_address } => {
+            to_binary(&query_user_token_balance(deps, user_address)?)
+        }
     }
 }
 
@@ -1137,16 +1360,141 @@ fn query_user_item_balance(
     }
 }
 
+fn query_user_token_balance(deps: Deps, user_address: String) -> StdResult<Response> {
+    let wood_token_addr = ITEM_TOKEN_MAPPING
+        .may_load(deps.storage, "gWood".to_string())?
+        .unwrap();
+    let food_token_addr = ITEM_TOKEN_MAPPING
+        .may_load(deps.storage, "gFood".to_string())?
+        .unwrap();
+    let stone_token_addr = ITEM_TOKEN_MAPPING
+        .may_load(deps.storage, "gStone".to_string())?
+        .unwrap();
+    let gold_token_addr = ITEM_TOKEN_MAPPING
+        .may_load(deps.storage, "gGold".to_string())?
+        .unwrap();
+
+    let wood_amount: Cw20BalanceResponse =
+        deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
+            contract_addr: wood_token_addr,
+            msg: to_binary(&Cw20QueryMsg::Balance {
+                address: user_address.to_string(),
+            })?,
+        }))?;
+
+    let food_amount: Cw20BalanceResponse =
+        deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
+            contract_addr: food_token_addr,
+            msg: to_binary(&Cw20QueryMsg::Balance {
+                address: user_address.to_string(),
+            })?,
+        }))?;
+
+    let gold_amount: Cw20BalanceResponse =
+        deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
+            contract_addr: stone_token_addr,
+            msg: to_binary(&Cw20QueryMsg::Balance {
+                address: user_address.to_string(),
+            })?,
+        }))?;
+
+    let stone_amount: Cw20BalanceResponse =
+        deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
+            contract_addr: gold_token_addr,
+            msg: to_binary(&Cw20QueryMsg::Balance {
+                address: user_address,
+            })?,
+        }))?;
+
+    Ok(Response::new()
+        .add_attribute("wood token balance", wood_amount.balance.to_string())
+        .add_attribute("food token balance", food_amount.balance.to_string())
+        .add_attribute("gold token balance", gold_amount.balance.to_string())
+        .add_attribute("stone token balance", stone_amount.balance.to_string()))
+}
+
+fn query_user_item_info(deps: Deps, user_address: String) -> StdResult<Response> {
+    let mut user_item_key = user_address.to_string();
+    user_item_key.push_str("gWood");
+    let g_wood_amount =
+        if let Some(g_wood_amount) = USER_ITEM_AMOUNT.may_load(deps.storage, user_item_key)? {
+            g_wood_amount
+        } else {
+            Uint128::zero()
+        };
+
+    let mut user_item_key = user_address.to_string();
+    user_item_key.push_str("gFood");
+    let g_food_amount =
+        if let Some(g_food_amount) = USER_ITEM_AMOUNT.may_load(deps.storage, user_item_key)? {
+            g_food_amount
+        } else {
+            Uint128::zero()
+        };
+
+    let mut user_item_key = user_address.to_string();
+    user_item_key.push_str("gGold");
+    let g_gold_amount =
+        if let Some(g_gold_amount) = USER_ITEM_AMOUNT.may_load(deps.storage, user_item_key)? {
+            g_gold_amount
+        } else {
+            Uint128::zero()
+        };
+
+    let mut user_item_key = user_address.to_string();
+    user_item_key.push_str("gStone");
+    let g_stone_amount =
+        if let Some(g_stone_amount) = USER_ITEM_AMOUNT.may_load(deps.storage, user_item_key)? {
+            g_stone_amount
+        } else {
+            Uint128::zero()
+        };
+
+    let user_energy =
+        if let Some(user_energy) = USER_ENERGY_LEVEL.may_load(deps.storage, user_address)? {
+            user_energy
+        } else {
+            Uint128::zero()
+        };
+
+    Ok(Response::new()
+        .add_attribute("gWood", g_wood_amount)
+        .add_attribute("gFood", g_food_amount)
+        .add_attribute("gGold", g_gold_amount)
+        .add_attribute("gStone", g_stone_amount)
+        .add_attribute("user_energy", user_energy))
+}
+
 fn query_nft_info(deps: Deps, token_id: String) -> StdResult<NftInfoResponse> {
     let info = tokens().load(deps.storage, &token_id)?;
+    let nft_reward_info = if let Some(nft_reward_info) =
+        REWARD_TOKEN.may_load(deps.storage, info.name.to_string())?
+    {
+        nft_reward_info
+    } else {
+        return Err(StdError::generic_err("token not found"));
+    };
+
+    let mut template_key = info.tool_type.to_string();
+    template_key.push_str(info.rarity.to_string().as_str());
+    let tool_template = if let Some(tool_template) =
+        TOOL_TEMPLATE_MAP.may_load(deps.storage, template_key.to_string())?
+    {
+        tool_template
+    } else {
+        return Err(StdError::generic_err("No token found"));
+    };
 
     Ok(NftInfoResponse {
-        token_uri: info.image.to_string(),
+        token_uri: tool_template.image.to_string(),
         extension: Extension {
             name: info.name,
-            description: info.description,
-            image: Some(info.image),
+            description: tool_template.description,
+            image: Some(tool_template.image),
             rarity: info.rarity,
+            mining_waiting_time: nft_reward_info.mining_waiting_time,
+            mining_rate: nft_reward_info.mining_rate,
+            owner: info.owner.to_string(),
         },
     })
 }
@@ -1161,18 +1509,39 @@ fn query_owner_of(deps: Deps, env: Env, token_id: String) -> StdResult<OwnerOfRe
 
 fn query_all_nft_info(deps: Deps, env: Env, token_id: String) -> StdResult<AllNftInfoResponse> {
     let info = tokens().load(deps.storage, &token_id)?;
+    let nft_reward_info = if let Some(nft_reward_info) =
+        REWARD_TOKEN.may_load(deps.storage, info.name.to_string())?
+    {
+        nft_reward_info
+    } else {
+        return Err(StdError::generic_err("token not found"));
+    };
+
+    let mut template_key = info.tool_type.to_string();
+    template_key.push_str(info.rarity.to_string().as_str());
+    let tool_template = if let Some(tool_template) =
+        TOOL_TEMPLATE_MAP.may_load(deps.storage, template_key.to_string())?
+    {
+        tool_template
+    } else {
+        return Err(StdError::generic_err("No token found"));
+    };
+
     Ok(AllNftInfoResponse {
         access: OwnerOfResponse {
             owner: info.owner.to_string(),
             approvals: humanize_approvals(&env.block, &info),
         },
         info: NftInfoResponse {
-            token_uri: info.image.to_string(),
+            token_uri: tool_template.image.to_string(),
             extension: Extension {
                 name: info.name,
-                description: info.description,
-                image: Some(info.image),
+                description: tool_template.description,
+                image: Some(tool_template.image),
                 rarity: info.rarity,
+                mining_waiting_time: nft_reward_info.mining_waiting_time,
+                mining_rate: nft_reward_info.mining_rate,
+                owner: info.owner.to_string(),
             },
         },
     })

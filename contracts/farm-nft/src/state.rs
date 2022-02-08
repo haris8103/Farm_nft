@@ -4,7 +4,7 @@ use cw721::{ContractInfoResponse, Expiration};
 use cw_storage_plus::{Index, IndexList, IndexedMap, Item, Map, MultiIndex};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::collections::{ HashSet};
+use std::collections::HashSet;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct TokenInfo {
@@ -16,10 +16,9 @@ pub struct TokenInfo {
     /// Identifies the asset to which this NFT represents
     pub name: String,
     /// Describes the asset to which this NFT represents
-    pub description: String,
+    // pub description: String,
     /// A URI pointing to an image representing the asset
-    pub image: String,
-
+    // pub image: String,
     pub rarity: String,
 
     pub reward_start_time: u64,
@@ -29,6 +28,8 @@ pub struct TokenInfo {
     pub pre_mint_tool: String,
 
     pub tool_type: String,
+
+    pub durability: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
@@ -86,7 +87,7 @@ pub fn tokens<'a>() -> IndexedMap<'a, &'a str, TokenInfo, TokenIndexes<'a>> {
     IndexedMap::new("tokens", indexes)
 }
 
-pub const LEVEL_DATA: Map<&str, u16> = Map::new("level_data");
+// pub const LEVEL_DATA: Map<&str, u16> = Map::new("level_data");
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
 pub struct Config {
@@ -95,6 +96,9 @@ pub struct Config {
     pub market_addr: String,
     pub legal_addr: String,
     pub burn_addr: String,
+    pub stake_limit: u64,
+    pub durability_start_time: u64,
+    pub reserve_addr: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
@@ -106,7 +110,7 @@ pub struct RewardToken {
 
 pub fn distribute_amount(
     store: &mut dyn Storage,
-    item: String,
+    item_name: String,
     amount: Uint128,
     config: &Config,
     env: &Env,
@@ -121,28 +125,28 @@ pub fn distribute_amount(
     add_amount_in_item_address(
         store,
         config.legal_addr.to_string(),
-        item.to_string(),
+        item_name.to_string(),
         legal_amount,
     );
     add_amount_in_item_address(
         store,
         config.team_addr.to_string(),
-        item.to_string(),
+        item_name.to_string(),
         team_market_amount,
     );
     add_amount_in_item_address(
         store,
         config.market_addr.to_string(),
-        item.to_string(),
+        item_name.to_string(),
         team_market_amount,
     );
     add_amount_in_item_address(
         store,
         env.contract.address.to_string(),
-        item.to_string(),
+        item_name.to_string(),
         contract_pool_amount,
     );
-    add_amount_in_item_address(store, config.burn_addr.to_string(), item, burn_amount);
+    add_amount_in_item_address(store, config.burn_addr.to_string(), item_name, burn_amount);
 }
 
 pub fn add_amount_in_item_address(
@@ -166,23 +170,20 @@ pub fn add_amount_in_item_address(
         .save(store, item_key.to_string(), &item_amount)
         .unwrap();
 }
-// #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
-// pub struct UserTokenInfo {
-//     pub amount: String,
-//     pub mining_rate: u64,
-//     pub mining_waiting_time: u64,
-// }
+
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
 pub struct ToolTemplate {
     pub name: String,
     pub description: String,
     pub image: String,
     pub rarity: String,
+    pub durability: u64,
     pub required_gwood_amount: Uint128,
     pub required_gfood_amount: Uint128,
     pub required_ggold_amount: Uint128,
     pub required_gstone_amount: Uint128,
 }
+
 pub const RARITY_TYPES: Map<String, String> = Map::new("Rarities");
 pub const CONFIG: Item<Config> = Item::new("Config");
 pub const REWARDS: Map<String, Vec<String>> = Map::new("Rewards");

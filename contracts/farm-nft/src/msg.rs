@@ -18,6 +18,12 @@ pub struct InstantiateMsg {
     pub legal_addr: String,
 
     pub burn_addr: String,
+
+    pub stake_limit: u64,
+
+    pub durability_from_start_time: u64,
+
+    pub reserve_addr: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -25,10 +31,6 @@ pub struct MintMsg {
     pub owner: Addr,
     /// Identifies the asset to which this NFT represents
     pub name: String,
-    /// A URI pointing to an image representing the asset
-    pub image: String,
-    /// Describes the asset to which this NFT represents (may be empty)
-    pub description: Option<String>,
     /// Custom extensions
     pub rarity: String,
 
@@ -115,6 +117,24 @@ pub enum ExecuteMsg {
     UpgradeNft {
         token_ids: Vec<String>,
     },
+
+    UpdateConfig {
+        team_addr: Option<String>,
+
+        market_addr: Option<String>,
+
+        legal_addr: Option<String>,
+
+        burn_addr: Option<String>,
+
+        stake_limit: Option<u64>,
+
+        durability_from_start_time: Option<u64>,
+
+        reserve_addr: Option<String>,
+    },
+
+    TransferReserveAmount {},
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -174,6 +194,12 @@ pub enum QueryMsg {
     UserEnergyInfo {
         user_address: String,
     },
+    UserItemInfo {
+        user_address: String,
+    },
+    UserTokenBalance {
+        user_address: String,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
@@ -187,16 +213,13 @@ pub struct TokenResponse {
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
 pub struct Extension {
-    /// Identifies the asset to which this NFT represents
     pub name: String,
-    /// Describes the asset to which this NFT represents
     pub description: String,
-    /// "A URI pointing to a resource with mime type image/* representing the asset to which this
-    /// NFT represents. Consider making any images at a width between 320 and 1080 pixels and aspect
-    /// ratio between 1.91:1 and 4:5 inclusive.
-    /// TODO: Use https://docs.rs/url_serde for type-safety
     pub image: Option<String>,
     pub rarity: String,
+    pub mining_rate: u64,
+    pub mining_waiting_time: u64,
+    pub owner: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
@@ -247,6 +270,7 @@ pub struct ToolTemplateMsg {
     pub required_gfood_amount: Uint128,
     pub required_ggold_amount: Uint128,
     pub required_gstone_amount: Uint128,
+    pub durability: u64,
 }
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct MigrateMsg {}
