@@ -27,6 +27,23 @@ pub struct InstantiateMsg {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct UpdateConfigMsg {
+    pub team_addr: Option<String>,
+
+    pub market_addr: Option<String>,
+
+    pub legal_addr: Option<String>,
+
+    pub burn_addr: Option<String>,
+
+    pub stake_limit: Option<u64>,
+
+    pub durability_from_start_time: Option<u64>,
+
+    pub reserve_addr: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct MintMsg {
     pub owner: Addr,
     /// Identifies the asset to which this NFT represents
@@ -95,8 +112,8 @@ pub enum ExecuteMsg {
         mining_rate: u64,
         mining_waiting_time: u64,
     },
-    AddCommonNftNames {
-        tool_name: String,
+    AddToolTypeNames {
+        tool_type: String,
     },
     BatchMint(MintMsg),
     AddItemToken {
@@ -118,21 +135,7 @@ pub enum ExecuteMsg {
         token_ids: Vec<String>,
     },
 
-    UpdateConfig {
-        team_addr: Option<String>,
-
-        market_addr: Option<String>,
-
-        legal_addr: Option<String>,
-
-        burn_addr: Option<String>,
-
-        stake_limit: Option<u64>,
-
-        durability_from_start_time: Option<u64>,
-
-        reserve_addr: Option<String>,
-    },
+    UpdateConfig(UpdateConfigMsg),
 
     TransferReserveAmount {},
 }

@@ -42,6 +42,9 @@ pub enum ContractError {
 
     #[error("Insufficient funds")]
     InSufficientFunds {},
+
+    #[error("No Token available for distribute")]
+    NoTokenAvailableForDistribute {},
 }
 
 impl From<cw721_base::ContractError> for ContractError {

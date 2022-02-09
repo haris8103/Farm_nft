@@ -11,30 +11,26 @@ use cw721::{
     ContractInfoResponse, Cw721ReceiveMsg, Expiration, NumTokensResponse, OwnerOfResponse,
     TokensResponse,
 };
-use std::collections::HashSet;
-//use cw721_base::contract::{execute_send_nft, execute_transfer_nft};
-
-//use cw721_base::ContractError; // TODO use custom errors instead
 use cw_storage_plus::Bound;
+use std::collections::HashSet;
 
 use crate::error::ContractError;
-use crate::mint::{execute_mint_common_nft, execute_mint_special_nft};
+use crate::mint::{execute_mint_common_nft, execute_mint_upgraded_nft};
 use crate::msg::{
     AllNftInfoResponse, Cw20HookMsg, Cw721HookMsg, ExecuteMsg, Extension, InstantiateMsg,
-    MigrateMsg, MintMsg, NftInfoResponse, QueryMsg, ToolTemplateMsg,
+    MigrateMsg, MintMsg, NftInfoResponse, QueryMsg, ToolTemplateMsg, UpdateConfigMsg,
 };
 use crate::state::{
-    increment_tokens, num_tokens, tokens, Approval, Config, RewardToken, TokenInfo, ToolTemplate,
-    CONFIG, CONTRACT_INFO, ITEM_TOKEN_MAPPING, LAST_GEN_TOKEN_ID, NFT_NAMES, OPERATORS,
-    RARITY_TYPES, REWARDS, REWARD_TOKEN, TOKEN_COUNT, TOKEN_ITEM_MAPPING, TOOL_TEMPLATE_MAP,
-    USER_ENERGY_LEVEL, USER_ITEM_AMOUNT, USER_STAKED_INFO,
+    distribute_amount, increment_tokens, num_tokens, tokens, Approval, Config, RewardToken,
+    TokenInfo, ToolTemplate, CONFIG, CONTRACT_INFO, GAME_DEV_TOKENS_NAME, ITEM_TOKEN_MAPPING,
+    LAST_GEN_TOKEN_ID, OPERATORS, RARITY_TYPES, REWARD_TOKEN, TOKEN_COUNT, TOKEN_ITEM_MAPPING,
+    TOOL_SET_MAP, TOOL_TEMPLATE_MAP, TOOL_TYPE_NAMES, USER_ENERGY_LEVEL, USER_ITEM_AMOUNT,
+    USER_STAKED_INFO,
 };
 
-// version info for migration info
 const CONTRACT_NAME: &str = "crates.io:loop-nft";
 const CONTRACT_VERSION: &str = env!("CARGO_PKG_VERSION");
-//const STAKE_LIMIT: u64 = 20;
-// used for limiting queries
+
 const DEFAULT_LIMIT: u32 = 10;
 const MAX_LIMIT: u32 = 30;
 
@@ -64,12 +60,18 @@ pub fn instantiate(
 
     CONTRACT_INFO.save(deps.storage, &contract_info)?;
     CONFIG.save(deps.storage, &config)?;
-    NFT_NAMES.save(deps.storage, &vec![])?;
+    TOOL_TYPE_NAMES.save(deps.storage, &vec![])?;
     LAST_GEN_TOKEN_ID.save(deps.storage, &0u64)?;
     RARITY_TYPES.save(deps.storage, "Common".to_string(), &"Uncommon".to_string())?;
     RARITY_TYPES.save(deps.storage, "Uncommon".to_string(), &"Rare".to_string())?;
     RARITY_TYPES.save(deps.storage, "Rare".to_string(), &"Legendary".to_string())?;
     RARITY_TYPES.save(deps.storage, "Legendary".to_string(), &"Mythic".to_string())?;
+    let mut game_dev_token_set = HashSet::<String>::new();
+    game_dev_token_set.insert("gWood".to_string());
+    game_dev_token_set.insert("gFood".to_string());
+    game_dev_token_set.insert("gGold".to_string());
+    game_dev_token_set.insert("gStone".to_string());
+    GAME_DEV_TOKENS_NAME.save(deps.storage, &game_dev_token_set)?;
     Ok(Response::default())
 }
 
@@ -82,7 +84,6 @@ pub fn execute(
 ) -> Result<Response, ContractError> {
     match msg {
         ExecuteMsg::Mint(msg) => execute_mint(deps, env, info, msg),
-        //  ExecuteMsg::Boost(msg) => execute_boost(deps, env, info, msg),
         ExecuteMsg::TransferNft {
             recipient,
             token_id,
@@ -111,8 +112,8 @@ pub fn execute(
             mining_rate,
             mining_waiting_time,
         ),
-        ExecuteMsg::AddCommonNftNames { tool_name } => {
-            execute_add_common_nft_names(deps, env, info, tool_name)
+        ExecuteMsg::AddToolTypeNames { tool_type } => {
+            execute_add_tool_type_names(deps, env, info, tool_type)
         }
         ExecuteMsg::BatchMint(msg) => execute_batch_mint(deps, env, info, msg),
         ExecuteMsg::AddItemToken {
@@ -132,75 +133,50 @@ pub fn execute(
         }
 
         ExecuteMsg::UpgradeNft { token_ids } => {
-            execute_mint_special_nft(deps, env, info, token_ids)
+            execute_mint_upgraded_nft(deps, env, info, token_ids)
         }
-        ExecuteMsg::UpdateConfig {
-            team_addr,
-            market_addr,
-            legal_addr,
-            burn_addr,
-            stake_limit,
-            durability_from_start_time,
-            reserve_addr,
-        } => execute_update_config(
-            deps,
-            info,
-            team_addr,
-            market_addr,
-            legal_addr,
-            burn_addr,
-            stake_limit,
-            durability_from_start_time,
-            reserve_addr,
-        ),
+        ExecuteMsg::UpdateConfig(msg) => execute_update_config(deps, info, msg),
 
-        ExecuteMsg::TransferReserveAmount {} => {
-            execute_transfer_amount_to_reserve_account(deps, info, env)
-        }
+        ExecuteMsg::TransferReserveAmount {} => execute_transfer_reserve_amount(deps, info, env),
     }
 }
 
 fn execute_update_config(
     deps: DepsMut,
     info: MessageInfo,
-    team_addr: Option<String>,
-    market_addr: Option<String>,
-    legal_addr: Option<String>,
-    burn_addr: Option<String>,
-    stake_limit: Option<u64>,
-    durability_from_start_time: Option<u64>,
-    reserve_addr: Option<String>,
+    msg: UpdateConfigMsg,
 ) -> Result<Response, ContractError> {
     let mut config = CONFIG.load(deps.storage)?;
     if config.minter != info.sender {
         return Err(ContractError::Unauthorized {});
     }
-    if team_addr.is_some() {
-        config.team_addr = team_addr.unwrap();
+    if msg.team_addr.is_some() {
+        config.team_addr = msg.team_addr.unwrap();
     }
-    if market_addr.is_some() {
-        config.market_addr = market_addr.unwrap();
+    if msg.market_addr.is_some() {
+        config.market_addr = msg.market_addr.unwrap();
     }
-    if legal_addr.is_some() {
-        config.legal_addr = legal_addr.unwrap();
+    if msg.legal_addr.is_some() {
+        config.legal_addr = msg.legal_addr.unwrap();
     }
-    if burn_addr.is_some() {
-        config.burn_addr = burn_addr.unwrap();
+    if msg.burn_addr.is_some() {
+        config.burn_addr = msg.burn_addr.unwrap();
     }
-    if stake_limit.is_some() {
-        config.stake_limit = stake_limit.unwrap();
+    if msg.stake_limit.is_some() {
+        config.stake_limit = msg.stake_limit.unwrap();
     }
-    if durability_from_start_time.is_some() {
-        config.durability_start_time += durability_from_start_time.unwrap();
+    if msg.durability_from_start_time.is_some() {
+        config.durability_start_time += msg.durability_from_start_time.unwrap();
     }
-    if reserve_addr.is_some() {
-        config.reserve_addr = reserve_addr.unwrap();
+    if msg.reserve_addr.is_some() {
+        config.reserve_addr = msg.reserve_addr.unwrap();
     }
     CONFIG.save(deps.storage, &config)?;
     Ok(Response::new())
 }
 
-fn execute_transfer_amount_to_reserve_account(
+/// to transfer reserve amount of contract pool to withdraw
+fn execute_transfer_reserve_amount(
     deps: DepsMut,
     info: MessageInfo,
     env: Env,
@@ -210,121 +186,46 @@ fn execute_transfer_amount_to_reserve_account(
         return Err(ContractError::Unauthorized {});
     }
     let mut responses: Vec<CosmosMsg> = vec![];
-
-    let mut user_address = env.contract.address.to_string();
-    user_address.push_str("gWood");
-    if let Some(contract_pool_amount) =
-        USER_ITEM_AMOUNT.may_load(deps.storage, user_address.to_string())?
-    {
-        let token_addr = if let Some(token_addr) =
-            ITEM_TOKEN_MAPPING.may_load(deps.storage, "gWood".to_string())?
+    let game_dev_token_set = GAME_DEV_TOKENS_NAME.load(deps.storage)?;
+    // iterating over dev token to get the reserve amount from all of them
+    for game_dev_token_name in game_dev_token_set {
+        let mut user_address = env.contract.address.to_string();
+        user_address.push_str(&game_dev_token_name.to_string());
+        if let Some(contract_pool_amount) =
+            USER_ITEM_AMOUNT.may_load(deps.storage, user_address.to_string())?
         {
-            token_addr
+            let token_addr = if let Some(token_addr) =
+                ITEM_TOKEN_MAPPING.may_load(deps.storage, game_dev_token_name.to_string())?
+            {
+                token_addr
+            } else {
+                return Err(ContractError::NotFound {});
+            };
+            // transfering contract pool to reserve addr
+            responses.push(CosmosMsg::Wasm(WasmMsg::Execute {
+                contract_addr: token_addr,
+                msg: to_binary(&Cw20ExecuteMsg::Transfer {
+                    recipient: config.reserve_addr.to_string(),
+                    amount: contract_pool_amount,
+                })
+                .unwrap(),
+                funds: vec![],
+            }));
+            contract_pool_amount
         } else {
-            return Err(ContractError::NotFound {});
+            Uint128::zero()
         };
-        responses.push(CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: token_addr,
-            msg: to_binary(&Cw20ExecuteMsg::Transfer {
-                recipient: config.reserve_addr.to_string(),
-                amount: contract_pool_amount.clone(),
-            })
-            .unwrap(),
-            funds: vec![],
-        }));
-        contract_pool_amount
-    } else {
-        Uint128::zero()
-    };
-
-    USER_ITEM_AMOUNT.save(deps.storage, "gWood".to_string(), &Uint128::zero())?;
-
-    let mut user_address = env.contract.address.to_string();
-    user_address.push_str("gFood");
-    if let Some(contract_pool_amount) =
-        USER_ITEM_AMOUNT.may_load(deps.storage, user_address.to_string())?
-    {
-        let token_addr = if let Some(token_addr) =
-            ITEM_TOKEN_MAPPING.may_load(deps.storage, "gFood".to_string())?
-        {
-            token_addr
-        } else {
-            return Err(ContractError::NotFound {});
-        };
-        responses.push(CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: token_addr,
-            msg: to_binary(&Cw20ExecuteMsg::Transfer {
-                recipient: config.reserve_addr.to_string(),
-                amount: contract_pool_amount.clone(),
-            })
-            .unwrap(),
-            funds: vec![],
-        }));
-        contract_pool_amount
-    } else {
-        Uint128::zero()
-    };
-
-    USER_ITEM_AMOUNT.save(deps.storage, "gFood".to_string(), &Uint128::zero())?;
-
-    let mut user_address = env.contract.address.to_string();
-    user_address.push_str("gGold");
-    if let Some(contract_pool_amount) =
-        USER_ITEM_AMOUNT.may_load(deps.storage, user_address.to_string())?
-    {
-        let token_addr = if let Some(token_addr) =
-            ITEM_TOKEN_MAPPING.may_load(deps.storage, "gGold".to_string())?
-        {
-            token_addr
-        } else {
-            return Err(ContractError::NotFound {});
-        };
-        responses.push(CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: token_addr,
-            msg: to_binary(&Cw20ExecuteMsg::Transfer {
-                recipient: config.reserve_addr.to_string(),
-                amount: contract_pool_amount.clone(),
-            })
-            .unwrap(),
-            funds: vec![],
-        }));
-        contract_pool_amount
-    } else {
-        Uint128::zero()
-    };
-
-    USER_ITEM_AMOUNT.save(deps.storage, "gGold".to_string(), &Uint128::zero())?;
-
-    let mut user_address = env.contract.address.to_string();
-    user_address.push_str("gStone");
-    if let Some(contract_pool_amount) =
-        USER_ITEM_AMOUNT.may_load(deps.storage, user_address.to_string())?
-    {
-        let token_addr = if let Some(token_addr) =
-            ITEM_TOKEN_MAPPING.may_load(deps.storage, "gStone".to_string())?
-        {
-            token_addr
-        } else {
-            return Err(ContractError::NotFound {});
-        };
-        responses.push(CosmosMsg::Wasm(WasmMsg::Execute {
-            contract_addr: token_addr,
-            msg: to_binary(&Cw20ExecuteMsg::Transfer {
-                recipient: config.reserve_addr.to_string(),
-                amount: contract_pool_amount.clone(),
-            })
-            .unwrap(),
-            funds: vec![],
-        }));
-        contract_pool_amount
-    } else {
-        Uint128::zero()
-    };
-
-    USER_ITEM_AMOUNT.save(deps.storage, "gStone".to_string(), &Uint128::zero())?;
+        //updating amount in map
+        USER_ITEM_AMOUNT.save(
+            deps.storage,
+            game_dev_token_name.to_string(),
+            &Uint128::zero(),
+        )?;
+    }
     Ok(Response::new().add_messages(responses))
 }
 
+/// adding tool template/snapshot in the contract
 fn execute_add_tool_template(
     deps: DepsMut,
     _env: Env,
@@ -335,23 +236,35 @@ fn execute_add_tool_template(
     if info.sender != config.minter {
         return Err(ContractError::Unauthorized {});
     }
-    let tool_template = ToolTemplate {
+    let mut tool_template = ToolTemplate {
         name: msg.name,
         description: msg.description,
         image: msg.image,
         rarity: msg.rarity.to_string(),
-        required_gwood_amount: msg.required_gwood_amount,
-        required_gfood_amount: msg.required_gfood_amount,
-        required_ggold_amount: msg.required_ggold_amount,
-        required_gstone_amount: msg.required_gstone_amount,
+        required_amount: vec![],
         durability: msg.durability,
     };
+
+    tool_template
+        .required_amount
+        .push(msg.required_gwood_amount);
+    tool_template
+        .required_amount
+        .push(msg.required_gfood_amount);
+    tool_template
+        .required_amount
+        .push(msg.required_ggold_amount);
+    tool_template
+        .required_amount
+        .push(msg.required_gstone_amount);
+
     let mut template_key = msg.tool_type;
     template_key.push_str(&msg.rarity);
     TOOL_TEMPLATE_MAP.save(deps.storage, template_key, &tool_template)?;
     Ok(Response::default())
 }
 
+/// to withdraw tokens in exchange of game dev tokens
 pub fn execute_withdraw(
     deps: DepsMut,
     _env: Env,
@@ -379,6 +292,7 @@ pub fn execute_withdraw(
         } else {
             return Err(ContractError::NotFound {});
         };
+    //transfering tokens to user
     let response = CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr: token_addr,
         msg: to_binary(&Cw20ExecuteMsg::Transfer {
@@ -392,7 +306,7 @@ pub fn execute_withdraw(
     USER_ITEM_AMOUNT.save(deps.storage, user_item_key, &user_item_amount)?;
     Ok(Response::default().add_message(response))
 }
-
+///adding game dev token against tokns or vice versa e.g. gWood -> some address
 pub fn execute_add_item_token(
     deps: DepsMut,
     _env: Env,
@@ -409,6 +323,7 @@ pub fn execute_add_item_token(
     Ok(Response::default())
 }
 
+///adding reward token
 pub fn execute_add_reward_token(
     deps: DepsMut,
     _env: Env,
@@ -429,33 +344,36 @@ pub fn execute_add_reward_token(
         mining_rate,
         mining_waiting_time,
     };
+
     REWARD_TOKEN.save(deps.storage, tool_name, &reward_token)?;
     Ok(Response::new().add_attribute("action", "distribution token added"))
 }
 
-pub fn execute_add_common_nft_names(
+/// adding tool type name
+pub fn execute_add_tool_type_names(
     deps: DepsMut,
     _env: Env,
     info: MessageInfo,
-    tool_name: String,
+    tool_type: String,
 ) -> Result<Response, ContractError> {
     let config = CONFIG.load(deps.storage)?;
 
     if info.sender != config.minter {
         return Err(ContractError::Unauthorized {});
     }
-    let mut common_nft_names = NFT_NAMES.may_load(deps.storage)?.unwrap();
-    for i in common_nft_names.iter() {
-        if *i == tool_name {
+    let mut tool_type_names = TOOL_TYPE_NAMES.may_load(deps.storage)?.unwrap();
+    for i in tool_type_names.iter() {
+        if *i == tool_type {
             return Err(ContractError::AlreadyExisits {});
         }
     }
 
-    common_nft_names.push(tool_name);
-    NFT_NAMES.save(deps.storage, &common_nft_names)?;
+    tool_type_names.push(tool_type);
+    TOOL_TYPE_NAMES.save(deps.storage, &tool_type_names)?;
     Ok(Response::new().add_attribute("action", "common name added"))
 }
 
+/// receiving cw20 tokens
 pub fn execute_receive_cw20(
     deps: DepsMut,
     env: Env,
@@ -469,6 +387,7 @@ pub fn execute_receive_cw20(
     }
 }
 
+///let user deposit tokens in exchange of dev tokens
 pub fn execute_deposit(
     deps: DepsMut,
     _env: Env,
@@ -496,6 +415,7 @@ pub fn execute_deposit(
     Ok(Response::new())
 }
 
+/// let admin deposit tokens
 pub fn execute_admin_deposit(
     deps: DepsMut,
     env: Env,
@@ -527,6 +447,7 @@ pub fn execute_admin_deposit(
     Ok(Response::new())
 }
 
+///let user refill energy to execute claiming reward transaction
 pub fn execute_refill_energy(
     deps: DepsMut,
     env: Env,
@@ -535,8 +456,6 @@ pub fn execute_refill_energy(
 ) -> Result<Response, ContractError> {
     let config = CONFIG.load(deps.storage)?;
 
-    let mut responses: Vec<CosmosMsg> = vec![];
-
     let mut user_energy_level = if let Some(user_energy_level) =
         USER_ENERGY_LEVEL.may_load(deps.storage, info.sender.to_string())?
     {
@@ -544,8 +463,9 @@ pub fn execute_refill_energy(
     } else {
         Uint128::zero()
     };
+
     let mut user_item_key = info.sender.to_string();
-    user_item_key.push_str("gfood");
+    user_item_key.push_str("gFood");
     let mut user_item_amount =
         if let Some(user_item_amount) = USER_ITEM_AMOUNT.may_load(deps.storage, user_item_key)? {
             user_item_amount
@@ -561,90 +481,11 @@ pub fn execute_refill_energy(
     USER_ENERGY_LEVEL.save(deps.storage, info.sender.to_string(), &user_energy_level)?;
     user_item_amount -= amount;
     USER_ITEM_AMOUNT.save(deps.storage, info.sender.to_string(), &user_item_amount)?;
-    let food_addr =
-        if let Some(food_addr) = TOKEN_ITEM_MAPPING.may_load(deps.storage, "gfood".to_string())? {
-            food_addr
-        } else {
-            return Err(ContractError::NotFound {});
-        };
-    let burn_amount = amount.multiply_ratio(Uint128::from(25u128), Uint128::from(100u128));
-    responses.push(CosmosMsg::Wasm(WasmMsg::Execute {
-        //burning equivalent food items
-        contract_addr: food_addr,
-        msg: to_binary(&Cw20ExecuteMsg::Burn {
-            amount: burn_amount,
-        })?,
-        funds: vec![],
-    }));
-
-    let team_and_market_amount =
-        amount.multiply_ratio(Uint128::from(10u128), Uint128::from(100u128));
-    let legal_amount = amount.multiply_ratio(Uint128::from(5u128), Uint128::from(100u128));
-    let contract_pool_amount =
-        amount - burn_amount - team_and_market_amount - team_and_market_amount - legal_amount;
-    //sending 10% to team address
-    let mut team_item_key = config.team_addr.to_string();
-    team_item_key.push_str("gfood");
-    let mut team_item_amount =
-        if let Some(team_item_amount) = USER_ITEM_AMOUNT.may_load(deps.storage, team_item_key)? {
-            team_item_amount
-        } else {
-            Uint128::zero()
-        };
-    team_item_amount += team_and_market_amount;
-    USER_ITEM_AMOUNT.save(
-        deps.storage,
-        config.team_addr.to_string(),
-        &team_item_amount,
-    )?;
-
-    //sending 10% to marketing address
-    let mut marketing_item_key = config.market_addr.to_string();
-    marketing_item_key.push_str("gfood");
-    let mut marketing_item_amount = if let Some(marketing_item_amount) =
-        USER_ITEM_AMOUNT.may_load(deps.storage, marketing_item_key)?
-    {
-        marketing_item_amount
-    } else {
-        Uint128::zero()
-    };
-    marketing_item_amount += team_and_market_amount;
-    USER_ITEM_AMOUNT.save(
-        deps.storage,
-        config.market_addr.to_string(),
-        &marketing_item_amount,
-    )?;
-
-    //sending 5% to legal address
-    let mut legal_item_key = config.legal_addr.to_string();
-    legal_item_key.push_str("gfood");
-    let mut legal_item_amount =
-        if let Some(legal_item_amount) = USER_ITEM_AMOUNT.may_load(deps.storage, legal_item_key)? {
-            legal_item_amount
-        } else {
-            Uint128::zero()
-        };
-    legal_item_amount += legal_amount;
-    USER_ITEM_AMOUNT.save(deps.storage, config.legal_addr, &legal_item_amount)?;
-
-    let mut contract_item_key = env.contract.address.to_string();
-    contract_item_key.push_str("gfood");
-    let mut contract_item_amount = if let Some(contract_item_amount) =
-        USER_ITEM_AMOUNT.may_load(deps.storage, contract_item_key.to_string())?
-    {
-        contract_item_amount
-    } else {
-        Uint128::zero()
-    };
-    contract_item_amount += contract_pool_amount;
-    USER_ITEM_AMOUNT.save(
-        deps.storage,
-        contract_item_key.to_string(),
-        &contract_item_amount,
-    )?;
-
-    Ok(Response::new().add_messages(responses))
+    distribute_amount(deps.storage, "gFood".to_string(), amount, &config, &env);
+    Ok(Response::new())
 }
+
+/// to mint multiple nfts in a single transaction
 pub fn execute_batch_mint(
     deps: DepsMut,
     env: Env,
@@ -662,7 +503,6 @@ pub fn execute_batch_mint(
     while number < msg.minting_count.unwrap() {
         token_ids.push_str(mint(deps.storage, &env, &msg).to_string().as_str());
         token_ids.push_str(" ,");
-        //execute_mint(deps, env, info, msg)
         number += 1;
     }
 
@@ -674,6 +514,7 @@ pub fn execute_batch_mint(
         .add_attribute("owner", msg.owner))
 }
 
+/// mint a nsft
 pub fn execute_mint(
     deps: DepsMut,
     env: Env,
@@ -697,6 +538,7 @@ pub fn execute_mint(
         .add_attribute("owner", msg.owner))
 }
 
+///minitng functionality
 pub fn mint(store: &mut dyn Storage, env: &Env, msg: &MintMsg) -> u64 {
     let mut template_key = msg.tool_type.to_string();
     template_key.push_str(msg.rarity.to_string().as_str());
@@ -718,21 +560,24 @@ pub fn mint(store: &mut dyn Storage, env: &Env, msg: &MintMsg) -> u64 {
     increment_tokens(store).unwrap();
     let last_gen_token_id = LAST_GEN_TOKEN_ID.load(store).unwrap();
     let new_toke_id = last_gen_token_id + 1;
+    //save last generated token id
     LAST_GEN_TOKEN_ID.save(store, &new_toke_id).unwrap();
+
+    //if contract is the owner than nft it means user has opened a pack
     if msg.owner == env.contract.address {
-        let mut token_ids =
-            if let Some(token_ids) = REWARDS.may_load(store, msg.tool_type.to_string()).unwrap() {
-                token_ids
-            } else {
-                vec![]
-            };
+        let mut token_ids = if let Some(token_ids) = TOOL_SET_MAP
+            .may_load(store, msg.tool_type.to_string())
+            .unwrap()
+        {
+            token_ids
+        } else {
+            vec![]
+        };
         token_ids.push(new_toke_id.to_string());
-        //let mut set = REWARD_ITEMS.load(store).unwrap();
-        //set.insert(msg.name.to_string());
-        REWARDS
+        //saving in tool set map
+        TOOL_SET_MAP
             .save(store, msg.tool_type.to_string(), &token_ids)
             .unwrap();
-        //REWARD_ITEMS.save(store, &set).unwrap();
         token.is_pack_token = false;
     }
     tokens()
@@ -744,6 +589,7 @@ pub fn mint(store: &mut dyn Storage, env: &Env, msg: &MintMsg) -> u64 {
     new_toke_id
 }
 
+/// transfering nft to other stakeholder
 pub fn execute_transfer_nft(
     deps: DepsMut,
     env: Env,
@@ -760,6 +606,7 @@ pub fn execute_transfer_nft(
         .add_attribute("token_id", token_id))
 }
 
+/// sending token
 pub fn execute_send_nft(
     deps: DepsMut,
     env: Env,
@@ -779,13 +626,14 @@ pub fn execute_send_nft(
 
     // Send message
     Ok(Response::new()
-        .add_message(send.into_cosmos_msg(contract.clone())?)
+        .add_message(send.into_cosmos_msg(contract.clone())?) // calling receiving cw721 functionalithy
         .add_attribute("action", "send_nft")
         .add_attribute("sender", info.sender)
         .add_attribute("recipient", contract)
         .add_attribute("token_id", token_id))
 }
 
+/// receive cw721
 pub fn execute_receive_cw721(
     deps: DepsMut,
     env: Env,
@@ -802,6 +650,7 @@ pub fn execute_receive_cw721(
     }
 }
 
+/// staking nft for earning reward
 pub fn execute_stake(
     deps: DepsMut,
     env: Env,
@@ -814,7 +663,7 @@ pub fn execute_stake(
     if token.is_pack_token {
         return Err(ContractError::NotEligible {});
     }
-
+    // if user is staking first time than the user will get 200 energy
     if USER_ENERGY_LEVEL
         .may_load(deps.storage, msg.sender.to_string())?
         .is_none()
@@ -845,6 +694,7 @@ pub fn execute_stake(
     Ok(Response::new())
 }
 
+/// unstaking nft
 pub fn execute_unstake(
     deps: DepsMut,
     env: Env,
@@ -868,7 +718,7 @@ pub fn execute_unstake(
     if token_info.reward_start_time + reward_info.mining_waiting_time > env.block.time.seconds() {
         return Err(ContractError::TimeNotReached {});
     }
-
+    // transfer it back to user
     responses.push(CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr: env.contract.address.into_string(),
         msg: to_binary(&ExecuteMsg::TransferNft {
@@ -882,6 +732,7 @@ pub fn execute_unstake(
     Ok(Response::new().add_messages(responses))
 }
 
+///let user open pack
 pub fn execute_open_pack(
     deps: DepsMut,
     env: Env,
@@ -893,17 +744,20 @@ pub fn execute_open_pack(
     if !token.is_pack_token {
         return Err(ContractError::NotEligible {});
     }
-    //let set: HashSet<String> = REWARD_ITEMS.load(deps.storage)?;
 
-    let set: Vec<String> = NFT_NAMES.may_load(deps.storage)?.unwrap();
+    let tool_types: Vec<String> = TOOL_TYPE_NAMES.may_load(deps.storage)?.unwrap();
     let contract_addr = env.clone().contract.address.into_string();
     let mut result: u64 = 0u64;
     let user_addr_bytes = msg.clone().sender.into_bytes();
     for user_addr_byte in user_addr_bytes {
-        result=result + user_addr_byte as u64;
+        result += user_addr_byte as u64;
     }
+    let mut transfered;
+    let mut number_iterated: HashSet<u64> = HashSet::<u64>::new();
     let number_to_add = result + msg.clone().token_id.parse::<u64>().unwrap();
-    transfer_pack_items(
+
+    // transfering pre minted tool
+    transfered = transfer_pack_nfts(
         deps.storage,
         env.clone(),
         token.pre_mint_tool,
@@ -912,33 +766,48 @@ pub fn execute_open_pack(
         contract_addr.clone(),
         number_to_add,
     );
-    let mut message: String = String::new();
     let mut number = 0;
+    let mut failure_count_of_transfer_pack = 0;
     let time_in_epoch_seconds = env.block.time.nanos();
-   
-    
 
-    let mut random_number = generate_random_number(time_in_epoch_seconds+number_to_add, set.len() as u64);
+    let mut random_number = generate_random_number(
+        time_in_epoch_seconds + number_to_add,
+        tool_types.len() as u64,
+    );
+    // if preminted tool set is no more available
+    if !transfered {
+        number = -1;
+    }
     while number < 3 {
-        message.push(' ');
-        message.push_str((number + 1).to_string().as_str());
-        message.push_str(": ");
-        message.push_str(env.clone().block.time.nanos().to_string().as_str());
-
-        transfer_pack_items(
+        transfered = transfer_pack_nfts(
             deps.storage,
             env.clone(),
-            set.get(random_number as usize).unwrap().to_string(),
+            tool_types.get(random_number as usize).unwrap().to_string(),
             &msg,
             &mut responses,
             contract_addr.clone(),
             number_to_add,
         );
-        number += 1;
-        random_number =
-            generate_random_number(time_in_epoch_seconds * number_to_add / random_number, set.len() as u64);
-    }
 
+        if failure_count_of_transfer_pack == 4 {
+            return Err(ContractError::NoTokenAvailableForDistribute {});
+        }
+        //if random index hit not available tool set
+        if !transfered {
+            random_number = (random_number + 1) % tool_types.len() as u64;
+            if !number_iterated.contains(&random_number) {
+                number_iterated.insert(random_number);
+                failure_count_of_transfer_pack += 1;
+            }
+            continue;
+        }
+        number += 1;
+        random_number = generate_random_number(
+            time_in_epoch_seconds * number_to_add / random_number,
+            tool_types.len() as u64,
+        );
+    }
+    // burning the token
     responses.push(CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr,
         msg: to_binary(&ExecuteMsg::Burn {
@@ -947,12 +816,11 @@ pub fn execute_open_pack(
         funds: vec![],
     }));
 
-    Ok(Response::new()
-        .add_messages(responses)
-        .add_attribute("seconds slots", message))
+    Ok(Response::new().add_messages(responses))
 }
 
-pub fn transfer_pack_items(
+///transfer opened pack nft
+pub fn transfer_pack_nfts(
     store: &mut dyn Storage,
     env: Env,
     tool_type: String,
@@ -960,17 +828,23 @@ pub fn transfer_pack_items(
     responses: &mut Vec<CosmosMsg>,
     contract_addr: String,
     number_to_add: u64,
-) {
+) -> bool {
     let time_in_epoch_seconds = env.block.time.nanos() + number_to_add;
     let mut token_ids =
-        if let Some(token_ids) = REWARDS.may_load(store, tool_type.to_string()).unwrap() {
+        if let Some(token_ids) = TOOL_SET_MAP.may_load(store, tool_type.to_string()).unwrap() {
             token_ids
         } else {
             vec![]
         };
-    let random_number = generate_random_number(time_in_epoch_seconds + token_ids.len() as u64 , token_ids.len() as u64);
+    if token_ids.len() as u64 <= 0 {
+        return false;
+    }
+    let random_number = generate_random_number(
+        time_in_epoch_seconds + token_ids.len() as u64,
+        token_ids.len() as u64,
+    );
     let token_id = token_ids.swap_remove(random_number as usize);
-    REWARDS.save(store, tool_type, &token_ids).unwrap();
+    TOOL_SET_MAP.save(store, tool_type, &token_ids).unwrap();
 
     responses.push(CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr,
@@ -981,8 +855,11 @@ pub fn transfer_pack_items(
         .unwrap(),
         funds: vec![],
     }));
+
+    true
 }
 
+///transfer nft
 pub fn _transfer_nft(
     deps: DepsMut,
     env: &Env,
@@ -1017,6 +894,7 @@ pub fn execute_approve(
         .add_attribute("token_id", token_id))
 }
 
+/// claiming reward
 pub fn execute_claim_reward(
     deps: DepsMut,
     env: Env,
@@ -1488,7 +1366,7 @@ fn query_nft_info(deps: Deps, token_id: String) -> StdResult<NftInfoResponse> {
     };
 
     let mut template_key = info.tool_type.to_string();
-    template_key.push_str(info.rarity.to_string().as_str());
+    template_key.push_str(info.rarity.as_str());
     let tool_template = if let Some(tool_template) =
         TOOL_TEMPLATE_MAP.may_load(deps.storage, template_key.to_string())?
     {
@@ -1530,7 +1408,7 @@ fn query_all_nft_info(deps: Deps, env: Env, token_id: String) -> StdResult<AllNf
     };
 
     let mut template_key = info.tool_type.to_string();
-    template_key.push_str(info.rarity.to_string().as_str());
+    template_key.push_str(info.rarity.as_str());
     let tool_template = if let Some(tool_template) =
         TOOL_TEMPLATE_MAP.may_load(deps.storage, template_key.to_string())?
     {

@@ -5,9 +5,11 @@ use crate::contract::{_check_can_send, burn, mint};
 use crate::error::ContractError;
 use crate::msg::MintMsg;
 use crate::state::{
-    distribute_amount, tokens, CONFIG, RARITY_TYPES, TOOL_TEMPLATE_MAP, USER_ITEM_AMOUNT,
+    distribute_amount, tokens, CONFIG, GAME_DEV_TOKENS_NAME, RARITY_TYPES, TOOL_TEMPLATE_MAP,
+    USER_ITEM_AMOUNT,
 };
 
+/// mint common rarity type NFT in exchange game dev tokens
 pub fn execute_mint_common_nft(
     deps: DepsMut,
     env: Env,
@@ -32,65 +34,39 @@ pub fn execute_mint_common_nft(
         minting_count: None,
         tool_type,
     };
+    let game_dev_token_set = GAME_DEV_TOKENS_NAME.load(deps.storage)?;
 
-    let mut user_addr = String::from(&info.sender.to_string());
-    user_addr.push_str("gWood");
-    let mut user_gwood_amount = if let Some(user_gwood_amount) =
-        USER_ITEM_AMOUNT.may_load(deps.storage, user_addr.to_string())?
-    {
-        user_gwood_amount
-    } else {
-        Uint128::zero()
-    };
-    if user_gwood_amount < tool_template.required_gwood_amount {
-        return Err(ContractError::InSufficientFunds {});
+    for (index, game_dev_token_name) in game_dev_token_set.into_iter().enumerate() {
+        let mut user_addr = String::from(&info.sender.to_string());
+        user_addr.push_str(&game_dev_token_name);
+        let mut item_required_amount = if let Some(item_required_amount) =
+            USER_ITEM_AMOUNT.may_load(deps.storage, game_dev_token_name.to_string())?
+        {
+            item_required_amount
+        } else {
+            Uint128::zero()
+        };
+        if item_required_amount < *tool_template.required_amount.get(index).unwrap() {
+            return Err(ContractError::InSufficientFunds {});
+        }
+        item_required_amount -= *tool_template.required_amount.get(index).unwrap();
+        let amount = *tool_template.required_amount.get(index).unwrap();
+        distribute_amount(
+            deps.storage,
+            game_dev_token_name.to_string(),
+            amount,
+            &config,
+            &env,
+        );
     }
-    user_gwood_amount -= tool_template.required_gwood_amount;
-    let amount = tool_template.required_gwood_amount;
-    distribute_amount(deps.storage, "gWood".to_string(), amount, &config, &env);
-
-    let mut user_addr = String::from(&info.sender.to_string());
-    user_addr.push_str("gGold");
-    let mut user_ggold_amount = if let Some(user_ggold_amount) =
-        USER_ITEM_AMOUNT.may_load(deps.storage, user_addr.to_string())?
-    {
-        user_ggold_amount
-    } else {
-        Uint128::zero()
-    };
-    if user_ggold_amount < tool_template.required_ggold_amount {
-        return Err(ContractError::InSufficientFunds {});
-    }
-    user_ggold_amount -= tool_template.required_ggold_amount;
-    USER_ITEM_AMOUNT.save(deps.storage, user_addr, &user_ggold_amount)?;
-
-    let amount = tool_template.required_ggold_amount;
-    distribute_amount(deps.storage, "gGold".to_string(), amount, &config, &env);
-    let mut user_addr = String::from(&info.sender.to_string());
-    user_addr.push_str("gStone");
-    let mut user_gstone_amount = if let Some(user_gstone_amount) =
-        USER_ITEM_AMOUNT.may_load(deps.storage, user_addr.to_string())?
-    {
-        user_gstone_amount
-    } else {
-        Uint128::zero()
-    };
-    if user_gstone_amount < tool_template.required_gstone_amount {
-        return Err(ContractError::InSufficientFunds {});
-    }
-    user_gstone_amount -= tool_template.required_gstone_amount;
-    USER_ITEM_AMOUNT.save(deps.storage, user_addr, &user_gstone_amount)?;
-
-    let amount = tool_template.required_gstone_amount;
-
-    distribute_amount(deps.storage, "gStone".to_string(), amount, &config, &env);
 
     mint(deps.storage, &env, &msg);
 
     Ok(Response::new())
 }
 
-pub fn execute_mint_special_nft(
+///mint upgraded nft in exchang of 1 step low level NFT
+pub fn execute_mint_upgraded_nft(
     deps: DepsMut,
     env: Env,
     info: MessageInfo,
