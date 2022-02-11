@@ -92,28 +92,34 @@ pub fn execute_receive_cw20(
     msg: Cw20ReceiveMsg,
 ) -> Result<Response, ContractError> {
     match from_binary(&msg.msg) {
-        Ok(Cw20HookMsg::PackFood {}) => execute_buy_pack(deps, env, info, msg, "Wood Miner".to_string()),
-        Ok(Cw20HookMsg::PackGold {}) => execute_buy_pack(deps, env, info, msg, "Food Miner".to_string()),
+        Ok(Cw20HookMsg::PackFood {}) => execute_buy_pack(deps, env, info, msg, "Food Miner".to_string()),
+        Ok(Cw20HookMsg::PackGold {}) => execute_buy_pack(deps, env, info, msg, "Gold Miner".to_string()),
         Ok(Cw20HookMsg::PackStone {}) => execute_buy_pack(deps, env, info, msg, "Stone Miner".to_string()),
-        Ok(Cw20HookMsg::PackWood {}) => execute_buy_pack(deps, env, info, msg, "Gold Miner".to_string()),
+        Ok(Cw20HookMsg::PackWood {}) => execute_buy_pack(deps, env, info, msg, "Wood Miner".to_string()),
         Err(_err) => Err(ContractError::Unauthorized {}),
     }
 }
 
 ///let user deposit tokens in exchange of dev tokens
 pub fn execute_buy_pack(
-    _deps: DepsMut,
-    env: Env,
+    deps: DepsMut,
+    _env: Env,
     info: MessageInfo,
-    _msg: Cw20ReceiveMsg,
+    msg: Cw20ReceiveMsg,
     tool_type: String,
 ) -> Result<Response, ContractError> {
-    
+    let config = CONFIG.load(deps.storage)?;
+    if config.ust_address != info.sender.to_string() {
+        return Err(ContractError::NotEligible{});
+    }
 
+    if msg.amount != config.pack_rate {
+        return Err(ContractError::InSufficientFunds{});
+    }
     let callback: CosmosMsg = CosmosMsg::Wasm(WasmMsg::Execute {
-        contract_addr: env.contract.address.into_string(),
+        contract_addr: config.nft_contract_address.to_string(),
         msg: to_binary(&NftExecuteMsg::TransferToolPack {
-            recipient: info.sender.to_string(),
+            recipient: msg.sender.to_string(),
             tool_type,
         })?,
         funds: vec![],
@@ -124,7 +130,7 @@ pub fn execute_buy_pack(
 
 
 #[cfg_attr(not(feature = "library"), entry_point)]
-pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
+pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
         QueryMsg::QueryRemainingAllPackCount{}
             => to_binary(&query_remaining_all_pack_count(deps)?),

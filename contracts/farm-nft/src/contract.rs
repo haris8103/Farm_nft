@@ -158,6 +158,10 @@ fn execute_transfer_tool_pack(
     } else {
         return Err(ContractError::NoTokenAvailableForDistribute{});
     };
+
+    if tool_pack_set.len() <= 0 {
+        return Err(ContractError::NoTokenAvailableForDistribute{});
+    }
     let token_id = tool_pack_set.swap_remove(0);
     _transfer_nft(deps, &env, &info, &recipient, &token_id)?;
     Ok(Response::new())
