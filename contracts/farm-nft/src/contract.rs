@@ -25,7 +25,7 @@ use crate::state::{
     TokenInfo, ToolTemplate, CONFIG, CONTRACT_INFO, GAME_DEV_TOKENS_NAME, ITEM_TOKEN_MAPPING,
     LAST_GEN_TOKEN_ID, OPERATORS, RARITY_TYPES, REWARD_TOKEN, TOKEN_COUNT, TOKEN_ITEM_MAPPING,
     TOOL_SET_MAP, TOOL_TEMPLATE_MAP, TOOL_TYPE_NAMES, USER_ENERGY_LEVEL, USER_ITEM_AMOUNT,
-    USER_STAKED_INFO,
+    USER_STAKED_INFO, TOOL_PACK_SET, 
 };
 
 const CONTRACT_NAME: &str = "crates.io:loop-nft";
@@ -138,9 +138,30 @@ pub fn execute(
         ExecuteMsg::UpdateConfig(msg) => execute_update_config(deps, info, msg),
 
         ExecuteMsg::TransferReserveAmount {} => execute_transfer_reserve_amount(deps, info, env),
+
+        ExecuteMsg::TransferToolPack {
+            recipient, 
+            tool_type,
+        } => execute_transfer_tool_pack(deps, info, env, recipient, tool_type),
     }
 }
 
+fn execute_transfer_tool_pack(
+    deps: DepsMut,
+    info: MessageInfo,
+    env: Env,
+    recipient: String,
+    tool_type: String,
+) -> Result<Response, ContractError> {
+    let mut tool_pack_set = if let Some(tool_pack_set) = TOOL_PACK_SET.may_load(deps.storage, tool_type)? {
+        tool_pack_set
+    } else {
+        return Err(ContractError::NoTokenAvailableForDistribute{});
+    };
+    let token_id = tool_pack_set.swap_remove(0);
+    _transfer_nft(deps, &env, &info, &recipient, &token_id)?;
+    Ok(Response::new())
+}
 fn execute_update_config(
     deps: DepsMut,
     info: MessageInfo,
@@ -579,6 +600,14 @@ pub fn mint(store: &mut dyn Storage, env: &Env, msg: &MintMsg) -> u64 {
             .save(store, msg.tool_type.to_string(), &token_ids)
             .unwrap();
         token.is_pack_token = false;
+    } else {
+        let mut tool_pack_set = if let Some(tool_pack_set) = TOOL_PACK_SET.may_load(store, msg.tool_type.to_string()).unwrap() {
+            tool_pack_set
+        } else {
+            vec![]
+        };
+        tool_pack_set.push(new_toke_id.to_string());
+        TOOL_PACK_SET.save(store, msg.tool_type.to_string(),  &tool_pack_set).unwrap();
     }
     tokens()
         .update(store, &new_toke_id.to_string(), |old| match old {
@@ -1223,6 +1252,12 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
         QueryMsg::UserTokenBalance { user_address } => {
             to_binary(&query_user_token_balance(deps, user_address)?)
         }
+
+        QueryMsg::QueryRemainingAllPackCount {} =>
+            to_binary(&query_remaining_all_pack_count(deps,)?),
+        QueryMsg::QueryRemainingPackCount {tool_type} =>
+            to_binary(&query_remaining_pack_count(deps, tool_type)?),
+            
     }
 }
 
@@ -1236,6 +1271,7 @@ fn query_user_energy_info(deps: Deps, user_address: String) -> StdResult<Uint128
         Ok(Uint128::zero())
     }
 }
+
 fn query_user_item_balance(
     deps: Deps,
     user_address: String,
@@ -1249,6 +1285,50 @@ fn query_user_item_balance(
         Ok(Uint128::zero())
     }
 }
+
+fn query_remaining_all_pack_count(
+    deps: Deps,
+) -> StdResult<u64> {
+    let wood_miner_count = if let Some(tool_set) = TOOL_PACK_SET.may_load(deps.storage,"Wood Miner".to_string())?{
+        tool_set.len() as u64
+    } else {
+        0u64
+    };
+    let food_miner_count = if let Some(tool_set) = TOOL_PACK_SET.may_load(deps.storage,"Food Miner".to_string())?{
+        tool_set.len() as u64
+    } else {
+        0u64
+    };
+    let stone_miner_count = if let Some(tool_set) = TOOL_PACK_SET.may_load(deps.storage,"Stone Miner".to_string())?{
+        tool_set.len() as u64
+    } else {
+        0u64
+    };
+    let gold_miner_count = if let Some(tool_set) = TOOL_PACK_SET.may_load(deps.storage,"Gold Miner".to_string())?{
+        tool_set.len() as u64
+    } else {
+        0u64
+    };
+
+    Ok(gold_miner_count + stone_miner_count + food_miner_count + wood_miner_count)
+
+}
+
+fn query_remaining_pack_count(
+    deps: Deps,
+    tool_type: String
+) -> StdResult<u64> {
+
+    let tool_count = if let Some(tool_set) = TOOL_PACK_SET.may_load(deps.storage,tool_type.to_string())?{
+        tool_set.len() as u64
+    } else {
+        0u64
+    };
+
+    Ok(tool_count)
+
+}
+
 
 fn query_user_token_balance(deps: Deps, user_address: String) -> StdResult<Response> {
     let wood_token_addr = ITEM_TOKEN_MAPPING

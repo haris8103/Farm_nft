@@ -1,0 +1,101 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ExecuteMsg",
+  "oneOf": [
+    {
+      "description": "Mint a new NFT, can only be called by the contract minter",
+      "type": "object",
+      "required": [
+        "mint"
+      ],
+      "properties": {
+        "mint": {
+          "$ref": "#/definitions/MintMsg"
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Transfer is a base message to move a token to another account without triggering actions",
+      "type": "object",
+      "required": [
+        "transfer_nft"
+      ],
+      "properties": {
+        "transfer_nft": {
+          "type": "object",
+          "required": [
+            "recipient",
+            "token_id"
+          ],
+          "properties": {
+            "recipient": {
+              "type": "string"
+            },
+            "token_id": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "description": "Send is a base message to transfer a token to a contract and trigger an action on the receiving contract.",
+      "type": "object",
+      "required": [
+        "send_nft"
+      ],
+      "properties": {
+        "send_nft": {
+          "type": "object",
+          "required": [
+            "contract",
+            "msg",
+            "token_id"
+          ],
+          "properties": {
+            "contract": {
+              "type": "string"
+            },
+            "msg": {
+              "$ref": "#/definitions/Binary"
+            },
+            "token_id": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  ],
+  "definitions": {
+    "Binary": {
+      "description": "Binary is a wrapper around Vec<u8> to add base64 de/serialization with serde. It also adds some helper methods to help encode inline.\n\nThis is only needed as serde-json-{core,wasm} has a horrible encoding for Vec<u8>",
+      "type": "string"
+    },
+    "MintMsg": {
+      "type": "object",
+      "required": [
+        "image",
+        "name",
+        "token_id"
+      ],
+      "properties": {
+        "image": {
+          "description": "A URI pointing to an image representing the asset",
+          "type": "string"
+        },
+        "name": {
+          "description": "Identifies the asset to which this NFT represents",
+          "type": "string"
+        },
+        "token_id": {
+          "description": "Unique ID of the NFT",
+          "type": "string"
+        }
+      }
+    }
+  }
+}

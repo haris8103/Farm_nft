@@ -138,6 +138,11 @@ pub enum ExecuteMsg {
     UpdateConfig(UpdateConfigMsg),
 
     TransferReserveAmount {},
+
+    TransferToolPack {
+        recipient: String,
+        tool_type: String,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -202,6 +207,11 @@ pub enum QueryMsg {
     },
     UserTokenBalance {
         user_address: String,
+    },
+    QueryRemainingAllPackCount{
+    },
+    QueryRemainingPackCount{
+        tool_type: String,
     },
 }
 

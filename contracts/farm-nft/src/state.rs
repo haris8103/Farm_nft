@@ -198,3 +198,4 @@ pub const TOKEN_ITEM_MAPPING: Map<String, String> = Map::new("TokenItemMapping")
 pub const LAST_GEN_TOKEN_ID: Item<u64> = Item::new("LastGenTokenId"); //contains the last token id in generating of nft
 pub const TOOL_TEMPLATE_MAP: Map<String, ToolTemplate> = Map::new("ToolTemplateMap"); //contains the template of tool or snapshot to create the new one
 pub const GAME_DEV_TOKENS_NAME: Item<HashSet<String>> = Item::new("GameDevTokensName"); // contains the name of game dev token e.g. gWood, gGold e.t.c
+pub const TOOL_PACK_SET: Map<String, Vec<String>> = Map::new("ToolPackSet"); //contains pack set against tool type
