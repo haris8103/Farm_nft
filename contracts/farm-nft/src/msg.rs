@@ -208,11 +208,12 @@ pub enum QueryMsg {
     UserTokenBalance {
         user_address: String,
     },
-    QueryRemainingAllPackCount{
-    },
-    QueryRemainingPackCount{
+    QueryRemainingAllPackCount {},
+    QueryRemainingPackCount {
         tool_type: String,
     },
+
+    QueryGameDevToken {},
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]

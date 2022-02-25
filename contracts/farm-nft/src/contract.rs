@@ -14,18 +14,18 @@ use cw721::{
 use cw_storage_plus::Bound;
 use std::collections::HashSet;
 
-use crate::error::ContractError;
-use crate::mint::{execute_mint_common_nft, execute_mint_upgraded_nft};
+use crate::mint::{
+    execute_batch_mint, execute_mint, execute_mint_common_nft, execute_mint_upgraded_nft,
+};
 use crate::msg::{
     AllNftInfoResponse, Cw20HookMsg, Cw721HookMsg, ExecuteMsg, Extension, InstantiateMsg,
-    MigrateMsg, MintMsg, NftInfoResponse, QueryMsg, ToolTemplateMsg, UpdateConfigMsg,
+    MigrateMsg, NftInfoResponse, QueryMsg, ToolTemplateMsg, UpdateConfigMsg,
 };
 use crate::state::{
-    distribute_amount, increment_tokens, num_tokens, tokens, Approval, Config, RewardToken,
-    TokenInfo, ToolTemplate, CONFIG, CONTRACT_INFO, GAME_DEV_TOKENS_NAME, ITEM_TOKEN_MAPPING,
-    LAST_GEN_TOKEN_ID, OPERATORS, RARITY_TYPES, REWARD_TOKEN, TOKEN_COUNT, TOKEN_ITEM_MAPPING,
-    TOOL_SET_MAP, TOOL_TEMPLATE_MAP, TOOL_TYPE_NAMES, USER_ENERGY_LEVEL, USER_ITEM_AMOUNT,
-    USER_STAKED_INFO, TOOL_PACK_SET, 
+    distribute_amount, num_tokens, tokens, Approval, Config, RewardToken, TokenInfo, ToolTemplate,
+    CONFIG, CONTRACT_INFO, GAME_DEV_TOKENS_NAME, ITEM_TOKEN_MAPPING, LAST_GEN_TOKEN_ID, OPERATORS,
+    RARITY_TYPES, REWARD_TOKEN, TOKEN_COUNT, TOKEN_ITEM_MAPPING, TOOL_PACK_SET, TOOL_SET_MAP,
+    TOOL_TEMPLATE_MAP, TOOL_TYPE_NAMES, USER_ENERGY_LEVEL, USER_ITEM_AMOUNT, USER_STAKED_INFO,
 };
 
 const CONTRACT_NAME: &str = "crates.io:loop-nft";
@@ -66,22 +66,17 @@ pub fn instantiate(
     RARITY_TYPES.save(deps.storage, "Uncommon".to_string(), &"Rare".to_string())?;
     RARITY_TYPES.save(deps.storage, "Rare".to_string(), &"Legendary".to_string())?;
     RARITY_TYPES.save(deps.storage, "Legendary".to_string(), &"Mythic".to_string())?;
-    let mut game_dev_token_set = HashSet::<String>::new();
-    game_dev_token_set.insert("gWood".to_string());
-    game_dev_token_set.insert("gFood".to_string());
-    game_dev_token_set.insert("gGold".to_string());
-    game_dev_token_set.insert("gStone".to_string());
+    let mut game_dev_token_set = Vec::<String>::new();
+    game_dev_token_set.push("gWood".to_string());
+    game_dev_token_set.push("gFood".to_string());
+    game_dev_token_set.push("gGold".to_string());
+    game_dev_token_set.push("gStone".to_string());
     GAME_DEV_TOKENS_NAME.save(deps.storage, &game_dev_token_set)?;
     Ok(Response::default())
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
-pub fn execute(
-    deps: DepsMut,
-    env: Env,
-    info: MessageInfo,
-    msg: ExecuteMsg,
-) -> Result<Response, ContractError> {
+pub fn execute(deps: DepsMut, env: Env, info: MessageInfo, msg: ExecuteMsg) -> StdResult<Response> {
     match msg {
         ExecuteMsg::Mint(msg) => execute_mint(deps, env, info, msg),
         ExecuteMsg::TransferNft {
@@ -140,7 +135,7 @@ pub fn execute(
         ExecuteMsg::TransferReserveAmount {} => execute_transfer_reserve_amount(deps, info, env),
 
         ExecuteMsg::TransferToolPack {
-            recipient, 
+            recipient,
             tool_type,
         } => execute_transfer_tool_pack(deps, info, env, recipient, tool_type),
     }
@@ -152,28 +147,38 @@ fn execute_transfer_tool_pack(
     env: Env,
     recipient: String,
     tool_type: String,
-) -> Result<Response, ContractError> {
-    let mut tool_pack_set = if let Some(tool_pack_set) = TOOL_PACK_SET.may_load(deps.storage, tool_type)? {
-        tool_pack_set
-    } else {
-        return Err(ContractError::NoTokenAvailableForDistribute{});
-    };
+) -> StdResult<Response> {
+    let mut tool_pack_set =
+        if let Some(tool_pack_set) = TOOL_PACK_SET.may_load(deps.storage, tool_type.to_string())? {
+            tool_pack_set
+        } else {
+            return Err(StdError::generic_err("No tool pack available to transfer"));
+        };
 
-    if tool_pack_set.len() <= 0 {
-        return Err(ContractError::NoTokenAvailableForDistribute{});
+    if tool_pack_set.is_empty() {
+        return Err(StdError::generic_err(
+            "No tool pack list available to transfer",
+        ));
     }
     let token_id = tool_pack_set.swap_remove(0);
+    //let token = tokens().load(deps.storage, &token_id)?;
+    TOOL_PACK_SET.save(deps.storage, tool_type, &tool_pack_set)?;
     _transfer_nft(deps, &env, &info, &recipient, &token_id)?;
-    Ok(Response::new())
+
+    Ok(Response::new()
+        .add_attribute("action", "transfer_tool_pack")
+        .add_attribute("sender", info.sender)
+        .add_attribute("recipient", recipient)
+        .add_attribute("token_id", token_id))
 }
 fn execute_update_config(
     deps: DepsMut,
     info: MessageInfo,
     msg: UpdateConfigMsg,
-) -> Result<Response, ContractError> {
+) -> StdResult<Response> {
     let mut config = CONFIG.load(deps.storage)?;
     if config.minter != info.sender {
-        return Err(ContractError::Unauthorized {});
+        return Err(StdError::generic_err("Unauthorized"));
     }
     if msg.team_addr.is_some() {
         config.team_addr = msg.team_addr.unwrap();
@@ -197,7 +202,9 @@ fn execute_update_config(
         config.reserve_addr = msg.reserve_addr.unwrap();
     }
     CONFIG.save(deps.storage, &config)?;
-    Ok(Response::new())
+    Ok(Response::new()
+        .add_attribute("action", "update config")
+        .add_attribute("sender", info.sender))
 }
 
 /// to transfer reserve amount of contract pool to withdraw
@@ -205,10 +212,10 @@ fn execute_transfer_reserve_amount(
     deps: DepsMut,
     info: MessageInfo,
     env: Env,
-) -> Result<Response, ContractError> {
+) -> StdResult<Response> {
     let config = CONFIG.load(deps.storage)?;
     if config.minter != info.sender {
-        return Err(ContractError::Unauthorized {});
+        return Err(StdError::generic_err("Unauthorized"));
     }
     let mut responses: Vec<CosmosMsg> = vec![];
     let game_dev_token_set = GAME_DEV_TOKENS_NAME.load(deps.storage)?;
@@ -224,7 +231,7 @@ fn execute_transfer_reserve_amount(
             {
                 token_addr
             } else {
-                return Err(ContractError::NotFound {});
+                return Err(StdError::generic_err("No Item token found"));
             };
             // transfering contract pool to reserve addr
             responses.push(CosmosMsg::Wasm(WasmMsg::Execute {
@@ -247,7 +254,10 @@ fn execute_transfer_reserve_amount(
             &Uint128::zero(),
         )?;
     }
-    Ok(Response::new().add_messages(responses))
+    Ok(Response::new()
+        .add_messages(responses)
+        .add_attribute("action", "transfer reserve amount")
+        .add_attribute("sender", info.sender))
 }
 
 /// adding tool template/snapshot in the contract
@@ -256,10 +266,10 @@ fn execute_add_tool_template(
     _env: Env,
     info: MessageInfo,
     msg: ToolTemplateMsg,
-) -> Result<Response, ContractError> {
+) -> StdResult<Response> {
     let config = CONFIG.load(deps.storage)?;
     if info.sender != config.minter {
-        return Err(ContractError::Unauthorized {});
+        return Err(StdError::generic_err("Unauthorized"));
     }
     let mut tool_template = ToolTemplate {
         name: msg.name,
@@ -286,7 +296,10 @@ fn execute_add_tool_template(
     let mut template_key = msg.tool_type;
     template_key.push_str(&msg.rarity);
     TOOL_TEMPLATE_MAP.save(deps.storage, template_key, &tool_template)?;
-    Ok(Response::default())
+    Ok(Response::default()
+        .add_attribute("action", "add tool template")
+        .add_attribute("sender", info.sender)
+        .add_attribute("tool template name", tool_template.name))
 }
 
 /// to withdraw tokens in exchange of game dev tokens
@@ -296,7 +309,7 @@ pub fn execute_withdraw(
     info: MessageInfo,
     item_name: String,
     amount: Uint128,
-) -> Result<Response, ContractError> {
+) -> StdResult<Response> {
     let mut user_item_key = info.sender.to_string();
 
     user_item_key.push_str(&item_name);
@@ -309,14 +322,15 @@ pub fn execute_withdraw(
         Uint128::zero()
     };
     if user_item_amount < amount {
-        return Err(ContractError::InSufficientFunds {});
+        return Err(StdError::generic_err("Insufficient funds"));
     }
-    let token_addr =
-        if let Some(token_addr) = ITEM_TOKEN_MAPPING.may_load(deps.storage, item_name)? {
-            token_addr
-        } else {
-            return Err(ContractError::NotFound {});
-        };
+    let token_addr = if let Some(token_addr) =
+        ITEM_TOKEN_MAPPING.may_load(deps.storage, item_name.to_string())?
+    {
+        token_addr
+    } else {
+        return Err(StdError::generic_err("Not found"));
+    };
     //transfering tokens to user
     let response = CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr: token_addr,
@@ -329,7 +343,11 @@ pub fn execute_withdraw(
     });
     user_item_amount -= amount;
     USER_ITEM_AMOUNT.save(deps.storage, user_item_key, &user_item_amount)?;
-    Ok(Response::default().add_message(response))
+    Ok(Response::default()
+        .add_message(response)
+        .add_attribute("action", "withdraw")
+        .add_attribute("item_name", item_name.to_string())
+        .add_attribute("amount", amount))
 }
 ///adding game dev token against tokns or vice versa e.g. gWood -> some address
 pub fn execute_add_item_token(
@@ -338,14 +356,17 @@ pub fn execute_add_item_token(
     info: MessageInfo,
     item_name: String,
     item_token_addr: String,
-) -> Result<Response, ContractError> {
+) -> StdResult<Response> {
     let config = CONFIG.load(deps.storage)?;
     if info.sender != config.minter {
-        return Err(ContractError::Unauthorized {});
+        return Err(StdError::generic_err("Unauthorized"));
     }
     TOKEN_ITEM_MAPPING.save(deps.storage, item_token_addr.to_string(), &item_name)?;
-    ITEM_TOKEN_MAPPING.save(deps.storage, item_name, &item_token_addr)?;
-    Ok(Response::default())
+    ITEM_TOKEN_MAPPING.save(deps.storage, item_name.to_string(), &item_token_addr)?;
+    Ok(Response::default()
+        .add_attribute("action", "add item token")
+        .add_attribute("item_name", item_name.to_string())
+        .add_attribute("item_address", item_token_addr.to_string()))
 }
 
 ///adding reward token
@@ -357,11 +378,11 @@ pub fn execute_add_reward_token(
     tool_name: String,
     mining_rate: u64,
     mining_waiting_time: u64,
-) -> Result<Response, ContractError> {
+) -> StdResult<Response> {
     let config = CONFIG.load(deps.storage)?;
 
     if info.sender != config.minter {
-        return Err(ContractError::Unauthorized {});
+        return Err(StdError::generic_err("Unauthorized"));
     }
 
     let reward_token = RewardToken {
@@ -380,16 +401,16 @@ pub fn execute_add_tool_type_names(
     _env: Env,
     info: MessageInfo,
     tool_type: String,
-) -> Result<Response, ContractError> {
+) -> StdResult<Response> {
     let config = CONFIG.load(deps.storage)?;
 
     if info.sender != config.minter {
-        return Err(ContractError::Unauthorized {});
+        return Err(StdError::generic_err("Unauthorized"));
     }
     let mut tool_type_names = TOOL_TYPE_NAMES.may_load(deps.storage)?.unwrap();
     for i in tool_type_names.iter() {
         if *i == tool_type {
-            return Err(ContractError::AlreadyExisits {});
+            return Err(StdError::generic_err("Already exist"));
         }
     }
 
@@ -404,11 +425,11 @@ pub fn execute_receive_cw20(
     env: Env,
     info: MessageInfo,
     msg: Cw20ReceiveMsg,
-) -> Result<Response, ContractError> {
+) -> StdResult<Response> {
     match from_binary(&msg.msg) {
         Ok(Cw20HookMsg::Deposit {}) => execute_deposit(deps, env, info, msg),
         Ok(Cw20HookMsg::AdminDeposit {}) => execute_admin_deposit(deps, env, info, msg),
-        Err(_err) => Err(ContractError::Unauthorized {}),
+        Err(_err) => Err(StdError::generic_err("Already exist")),
     }
 }
 
@@ -418,13 +439,13 @@ pub fn execute_deposit(
     _env: Env,
     info: MessageInfo,
     msg: Cw20ReceiveMsg,
-) -> Result<Response, ContractError> {
+) -> StdResult<Response> {
     let item_name = if let Some(item_name) =
         TOKEN_ITEM_MAPPING.may_load(deps.storage, info.sender.to_string())?
     {
         item_name
     } else {
-        return Err(ContractError::NotFound {});
+        return Err(StdError::generic_err("No token item found"));
     };
     let mut user_item_key = msg.sender.to_string();
     user_item_key.push_str(&item_name);
@@ -437,7 +458,10 @@ pub fn execute_deposit(
     };
     user_item_amount += msg.amount;
     USER_ITEM_AMOUNT.save(deps.storage, user_item_key, &user_item_amount)?;
-    Ok(Response::new())
+    Ok(Response::new()
+        .add_attribute("action", "deposit")
+        .add_attribute("sender", msg.sender)
+        .add_attribute("amount", msg.amount))
 }
 
 /// let admin deposit tokens
@@ -446,17 +470,17 @@ pub fn execute_admin_deposit(
     env: Env,
     info: MessageInfo,
     msg: Cw20ReceiveMsg,
-) -> Result<Response, ContractError> {
+) -> StdResult<Response> {
     let config = CONFIG.load(deps.storage)?;
     if config.minter != msg.sender {
-        return Err(ContractError::Unauthorized {});
+        return Err(StdError::generic_err("Unauthorized"));
     }
     let item_name = if let Some(item_name) =
         TOKEN_ITEM_MAPPING.may_load(deps.storage, info.sender.to_string())?
     {
         item_name
     } else {
-        return Err(ContractError::NotFound {});
+        return Err(StdError::generic_err("Not found"));
     };
     let mut contract_item_key = env.contract.address.to_string();
     contract_item_key.push_str(&item_name);
@@ -469,7 +493,10 @@ pub fn execute_admin_deposit(
     };
     contract_item_amount += msg.amount;
     USER_ITEM_AMOUNT.save(deps.storage, contract_item_key, &contract_item_amount)?;
-    Ok(Response::new())
+    Ok(Response::new()
+        .add_attribute("action", "admin_deposit")
+        .add_attribute("sender", msg.sender)
+        .add_attribute("amount", msg.amount))
 }
 
 ///let user refill energy to execute claiming reward transaction
@@ -478,7 +505,7 @@ pub fn execute_refill_energy(
     env: Env,
     info: MessageInfo,
     amount: u64,
-) -> Result<Response, ContractError> {
+) -> StdResult<Response> {
     let config = CONFIG.load(deps.storage)?;
 
     let mut user_energy_level = if let Some(user_energy_level) =
@@ -499,7 +526,7 @@ pub fn execute_refill_energy(
         };
     let amount = Uint128::from(amount);
     if user_item_amount < amount {
-        return Err(ContractError::InSufficientFunds {});
+        return Err(StdError::generic_err("Insufficient funds"));
     }
     user_energy_level += amount.multiply_ratio(Uint128::from(3u128), Uint128::from(1u128));
 
@@ -507,119 +534,10 @@ pub fn execute_refill_energy(
     user_item_amount -= amount;
     USER_ITEM_AMOUNT.save(deps.storage, info.sender.to_string(), &user_item_amount)?;
     distribute_amount(deps.storage, "gFood".to_string(), amount, &config, &env);
-    Ok(Response::new())
-}
-
-/// to mint multiple nfts in a single transaction
-pub fn execute_batch_mint(
-    deps: DepsMut,
-    env: Env,
-    info: MessageInfo,
-    msg: MintMsg,
-) -> Result<Response, ContractError> {
-    let config = CONFIG.load(deps.storage)?;
-
-    if info.sender != config.minter {
-        return Err(ContractError::Unauthorized {});
-    }
-    let mut number = 0u64;
-    let mut token_ids: String = String::new();
-    // create the token
-    while number < msg.minting_count.unwrap() {
-        token_ids.push_str(mint(deps.storage, &env, &msg).to_string().as_str());
-        token_ids.push_str(" ,");
-        number += 1;
-    }
-
     Ok(Response::new()
-        .add_attribute("action", "mint")
-        .add_attribute("minter", info.sender)
-        .add_attribute("token_ids", token_ids.as_str())
-        .add_attribute("contract address", env.contract.address.into_string())
-        .add_attribute("owner", msg.owner))
-}
-
-/// mint a nsft
-pub fn execute_mint(
-    deps: DepsMut,
-    env: Env,
-    info: MessageInfo,
-    msg: MintMsg,
-) -> Result<Response, ContractError> {
-    let config = CONFIG.load(deps.storage)?;
-
-    if info.sender != config.minter {
-        return Err(ContractError::Unauthorized {});
-    }
-
-    // create the token
-    let token_id = mint(deps.storage, &env, &msg);
-
-    Ok(Response::new()
-        .add_attribute("action", "mint")
-        .add_attribute("minter", info.sender)
-        .add_attribute("token_id", token_id.to_string())
-        .add_attribute("contract address", env.contract.address.into_string())
-        .add_attribute("owner", msg.owner))
-}
-
-///minitng functionality
-pub fn mint(store: &mut dyn Storage, env: &Env, msg: &MintMsg) -> u64 {
-    let mut template_key = msg.tool_type.to_string();
-    template_key.push_str(msg.rarity.to_string().as_str());
-    let tool_template = TOOL_TEMPLATE_MAP
-        .load(store, template_key.to_string())
-        .unwrap();
-
-    let mut token = TokenInfo {
-        name: msg.name.to_string(),
-        owner: msg.owner.clone(),
-        approvals: vec![],
-        rarity: msg.rarity.to_string(),
-        reward_start_time: env.block.time.seconds(),
-        is_pack_token: true,
-        pre_mint_tool: msg.pre_mint_tool.clone().unwrap_or_else(|| "".to_string()),
-        tool_type: msg.tool_type.to_string(),
-        durability: tool_template.durability,
-    };
-    increment_tokens(store).unwrap();
-    let last_gen_token_id = LAST_GEN_TOKEN_ID.load(store).unwrap();
-    let new_toke_id = last_gen_token_id + 1;
-    //save last generated token id
-    LAST_GEN_TOKEN_ID.save(store, &new_toke_id).unwrap();
-
-    //if contract is the owner than nft it means user has opened a pack
-    if msg.owner == env.contract.address {
-        let mut token_ids = if let Some(token_ids) = TOOL_SET_MAP
-            .may_load(store, msg.tool_type.to_string())
-            .unwrap()
-        {
-            token_ids
-        } else {
-            vec![]
-        };
-        token_ids.push(new_toke_id.to_string());
-        //saving in tool set map
-        TOOL_SET_MAP
-            .save(store, msg.tool_type.to_string(), &token_ids)
-            .unwrap();
-        token.is_pack_token = false;
-    } else {
-        let mut tool_pack_set = if let Some(tool_pack_set) = TOOL_PACK_SET.may_load(store, msg.tool_type.to_string()).unwrap() {
-            tool_pack_set
-        } else {
-            vec![]
-        };
-        tool_pack_set.push(new_toke_id.to_string());
-        TOOL_PACK_SET.save(store, msg.tool_type.to_string(),  &tool_pack_set).unwrap();
-    }
-    tokens()
-        .update(store, &new_toke_id.to_string(), |old| match old {
-            Some(_) => Err(ContractError::Claimed {}),
-            None => Ok(token),
-        })
-        .unwrap();
-    new_toke_id
+        .add_attribute("action", "refill_energy")
+        .add_attribute("sender", info.sender)
+        .add_attribute("amount", amount))
 }
 
 /// transfering nft to other stakeholder
@@ -629,7 +547,7 @@ pub fn execute_transfer_nft(
     info: MessageInfo,
     recipient: String,
     token_id: String,
-) -> Result<Response, ContractError> {
+) -> StdResult<Response> {
     _transfer_nft(deps, &env, &info, &recipient, &token_id)?;
 
     Ok(Response::new()
@@ -647,7 +565,7 @@ pub fn execute_send_nft(
     contract: String,
     token_id: String,
     msg: Binary,
-) -> Result<Response, ContractError> {
+) -> StdResult<Response> {
     // Transfer token
     _transfer_nft(deps, &env, &info, &contract, &token_id)?;
 
@@ -672,29 +590,28 @@ pub fn execute_receive_cw721(
     env: Env,
     info: MessageInfo,
     msg: Cw721ReceiveMsg,
-) -> Result<Response, ContractError> {
+) -> StdResult<Response> {
+    println!("contract address {} ", env.contract.address);
     if env.contract.address != info.sender {
-        return Err(ContractError::Unauthorized {});
+        return Err(StdError::generic_err("Unauthorized"));
     }
     match from_binary(&msg.msg) {
         Ok(Cw721HookMsg::Stake {}) => execute_stake(deps, env, msg),
         Ok(Cw721HookMsg::OpenPack {}) => execute_open_pack(deps, env, msg),
-        Err(_err) => Err(ContractError::Unauthorized {}),
+        Err(_err) => Err(StdError::generic_err("no method found")),
     }
 }
 
 /// staking nft for earning reward
-pub fn execute_stake(
-    deps: DepsMut,
-    env: Env,
-    msg: Cw721ReceiveMsg,
-) -> Result<Response, ContractError> {
+pub fn execute_stake(deps: DepsMut, env: Env, msg: Cw721ReceiveMsg) -> StdResult<Response> {
     let config = CONFIG.load(deps.storage)?;
     let mut token = tokens().load(deps.storage, &msg.token_id)?;
 
     // check that only pack can be opened, not any ohter nft from our contract
     if token.is_pack_token {
-        return Err(ContractError::NotEligible {});
+        return Err(StdError::generic_err(
+            "Not eligible because provided token is a pack token",
+        ));
     }
     // if user is staking first time than the user will get 200 energy
     if USER_ENERGY_LEVEL
@@ -717,14 +634,17 @@ pub fn execute_stake(
     };
 
     if stake_info.len() as u64 > config.stake_limit {
-        return Err(ContractError::LimitReached {});
+        return Err(StdError::generic_err("Limit reached"));
     }
 
     token.reward_start_time = env.block.time.seconds();
     stake_info.insert(msg.token_id.to_string());
-    USER_STAKED_INFO.save(deps.storage, msg.sender, &stake_info)?;
+    USER_STAKED_INFO.save(deps.storage, msg.sender.to_string(), &stake_info)?;
     tokens().save(deps.storage, &msg.token_id, &token)?;
-    Ok(Response::new())
+    Ok(Response::new()
+        .add_attribute("action", "stake")
+        .add_attribute("sender", msg.sender.to_string())
+        .add_attribute("token_id", msg.token_id))
 }
 
 /// unstaking nft
@@ -733,23 +653,23 @@ pub fn execute_unstake(
     env: Env,
     info: MessageInfo,
     token_id: String,
-) -> Result<Response, ContractError> {
+) -> StdResult<Response> {
     let mut responses: Vec<CosmosMsg> = vec![];
     let mut stake_ids_set = if let Some(stake_ids_set) =
         USER_STAKED_INFO.may_load(deps.storage, info.sender.to_string())?
     {
         stake_ids_set
     } else {
-        return Err(ContractError::NotFound {});
+        return Err(StdError::generic_err("No staked asset found"));
     };
 
     if !stake_ids_set.contains(&token_id.to_string()) {
-        return Err(ContractError::NotFound {});
+        return Err(StdError::generic_err("No token id found"));
     }
     let token_info = tokens().load(deps.storage, &token_id)?;
     let reward_info = REWARD_TOKEN.load(deps.storage, token_info.name.to_string())?;
     if token_info.reward_start_time + reward_info.mining_waiting_time > env.block.time.seconds() {
-        return Err(ContractError::TimeNotReached {});
+        return Err(StdError::generic_err("Time not reached yet"));
     }
     // transfer it back to user
     responses.push(CosmosMsg::Wasm(WasmMsg::Execute {
@@ -762,22 +682,24 @@ pub fn execute_unstake(
     }));
     stake_ids_set.remove(&token_id);
     USER_STAKED_INFO.save(deps.storage, info.sender.to_string(), &stake_ids_set)?;
-    Ok(Response::new().add_messages(responses))
+    Ok(Response::new()
+        .add_messages(responses)
+        .add_attribute("action", "Unstake")
+        .add_attribute("sender", info.sender)
+        .add_attribute("token_id", token_id))
 }
 
 ///let user open pack
-pub fn execute_open_pack(
-    deps: DepsMut,
-    env: Env,
-    msg: Cw721ReceiveMsg,
-) -> Result<Response, ContractError> {
+pub fn execute_open_pack(deps: DepsMut, env: Env, msg: Cw721ReceiveMsg) -> StdResult<Response> {
     let token = tokens().load(deps.storage, &msg.token_id)?;
     let mut responses: Vec<CosmosMsg> = vec![];
+
     // check that only pack can be opened, not any other nft from our contract
     if !token.is_pack_token {
-        return Err(ContractError::NotEligible {});
+        return Err(StdError::generic_err(
+            "Not eligible as token is not a pack token",
+        ));
     }
-
     let tool_types: Vec<String> = TOOL_TYPE_NAMES.may_load(deps.storage)?.unwrap();
     let contract_addr = env.clone().contract.address.into_string();
     let mut result: u64 = 0u64;
@@ -787,46 +709,48 @@ pub fn execute_open_pack(
     }
     let mut transfered;
     let mut number_iterated: HashSet<u64> = HashSet::<u64>::new();
-    let number_to_add = result + msg.clone().token_id.parse::<u64>().unwrap();
+    let mut number_to_add = result + msg.clone().token_id.parse::<u64>().unwrap();
+    let mut time_in_epoch_seconds = env.block.time.nanos();
 
     // transfering pre minted tool
     transfered = transfer_pack_nfts(
         deps.storage,
-        env.clone(),
+        time_in_epoch_seconds,
         token.pre_mint_tool,
         &msg,
         &mut responses,
         contract_addr.clone(),
         number_to_add,
     );
-    let mut number = 0;
+    let mut iterator = 0;
+    let mut number = 3;
     let mut failure_count_of_transfer_pack = 0;
-    let time_in_epoch_seconds = env.block.time.nanos();
 
     let mut random_number = generate_random_number(
         time_in_epoch_seconds + number_to_add,
         tool_types.len() as u64,
     );
+
     // if preminted tool set is no more available
-    if !transfered {
-        number = -1;
+    if !transfered.unwrap() {
+        number = 4;
     }
-    while number < 3 {
+
+    while iterator < number {
         transfered = transfer_pack_nfts(
             deps.storage,
-            env.clone(),
+            time_in_epoch_seconds,
             tool_types.get(random_number as usize).unwrap().to_string(),
             &msg,
             &mut responses,
             contract_addr.clone(),
             number_to_add,
         );
-
-        if failure_count_of_transfer_pack == 4 {
-            return Err(ContractError::NoTokenAvailableForDistribute {});
+        if failure_count_of_transfer_pack == number {
+            return Err(StdError::generic_err("No Tool available to distribute"));
         }
         //if random index hit not available tool set
-        if !transfered {
+        if !transfered.unwrap() {
             random_number = (random_number + 1) % tool_types.len() as u64;
             if !number_iterated.contains(&random_number) {
                 number_iterated.insert(random_number);
@@ -834,9 +758,12 @@ pub fn execute_open_pack(
             }
             continue;
         }
-        number += 1;
+
+        iterator += 1;
+        number_to_add += random_number;
+        time_in_epoch_seconds += random_number;
         random_number = generate_random_number(
-            time_in_epoch_seconds * number_to_add / random_number,
+            iterator + time_in_epoch_seconds + number_to_add - random_number,
             tool_types.len() as u64,
         );
     }
@@ -844,38 +771,51 @@ pub fn execute_open_pack(
     responses.push(CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr,
         msg: to_binary(&ExecuteMsg::Burn {
-            token_id: msg.token_id,
+            token_id: msg.token_id.to_string(),
         })?,
         funds: vec![],
     }));
 
-    Ok(Response::new().add_messages(responses))
+    Ok(Response::new()
+        .add_messages(responses)
+        .add_attribute("action", "open_pack")
+        .add_attribute("sender", msg.sender)
+        .add_attribute("pack_token_id", msg.token_id))
 }
 
 ///transfer opened pack nft
 pub fn transfer_pack_nfts(
     store: &mut dyn Storage,
-    env: Env,
+    mut time_in_epoch_seconds: u64,
     tool_type: String,
     msg: &Cw721ReceiveMsg,
     responses: &mut Vec<CosmosMsg>,
     contract_addr: String,
     number_to_add: u64,
-) -> bool {
-    let time_in_epoch_seconds = env.block.time.nanos() + number_to_add;
+) -> StdResult<bool> {
+    time_in_epoch_seconds += number_to_add;
+
     let mut token_ids =
-        if let Some(token_ids) = TOOL_SET_MAP.may_load(store, tool_type.to_string()).unwrap() {
+        if let Some(token_ids) = TOOL_SET_MAP.may_load(store, tool_type.to_string())? {
             token_ids
         } else {
-            vec![]
+            let mut message = " tool type: ".to_string();
+            message.push_str(&tool_type.to_string());
+            message.push_str(" error in token ids");
+            return Err(StdError::generic_err(message));
         };
-    if token_ids.len() as u64 <= 0 {
-        return false;
-    }
+    println!(
+        "tool_type.to_string() {}, token ids {} ",
+        tool_type.to_string(),
+        token_ids.len()
+    );
     let random_number = generate_random_number(
         time_in_epoch_seconds + token_ids.len() as u64,
         token_ids.len() as u64,
     );
+    if token_ids.len() == 0 {
+        return Ok(false);
+    }
     let token_id = token_ids.swap_remove(random_number as usize);
     TOOL_SET_MAP.save(store, tool_type, &token_ids).unwrap();
 
@@ -889,7 +829,7 @@ pub fn transfer_pack_nfts(
         funds: vec![],
     }));
 
-    true
+    Ok(true)
 }
 
 ///transfer nft
@@ -899,7 +839,7 @@ pub fn _transfer_nft(
     info: &MessageInfo,
     recipient: &str,
     token_id: &str,
-) -> Result<TokenInfo, ContractError> {
+) -> StdResult<TokenInfo> {
     let mut token = tokens().load(deps.storage, token_id)?;
     // ensure we have permissions
     check_can_send(deps.as_ref(), env, info, &token)?;
@@ -917,7 +857,7 @@ pub fn execute_approve(
     spender: String,
     token_id: String,
     expires: Option<Expiration>,
-) -> Result<Response, ContractError> {
+) -> StdResult<Response> {
     _update_approvals(deps, &env, &info, &spender, &token_id, true, expires)?;
 
     Ok(Response::new()
@@ -933,12 +873,12 @@ pub fn execute_claim_reward(
     env: Env,
     info: MessageInfo,
     token_id: String,
-) -> Result<Response, ContractError> {
+) -> StdResult<Response> {
     let config = CONFIG.load(deps.storage)?;
     let mut token_info = if let Some(token_info) = tokens().may_load(deps.storage, &token_id)? {
         token_info
     } else {
-        return Err(ContractError::NotFound {});
+        return Err(StdError::generic_err("No token found"));
     };
 
     let mut user_energy_level = if let Some(user_energy_level) =
@@ -946,11 +886,11 @@ pub fn execute_claim_reward(
     {
         user_energy_level
     } else {
-        return Err(ContractError::NoEnergy {});
+        return Err(StdError::generic_err("No energy"));
     };
 
     if user_energy_level < Uint128::from(3u128) {
-        return Err(ContractError::NotEnoughEnergy {});
+        return Err(StdError::generic_err("Not enough energy"));
     }
 
     user_energy_level -= Uint128::from(3u128);
@@ -960,18 +900,18 @@ pub fn execute_claim_reward(
     {
         stake_info
     } else {
-        return Err(ContractError::NotEligible {});
+        return Err(StdError::generic_err("No staked asset found"));
     };
 
     if !stake_info.contains(&token_id) {
-        return Err(ContractError::NotFound {});
+        return Err(StdError::generic_err("No token id found"));
     }
     let reward_token = if let Some(reward_token) =
         REWARD_TOKEN.may_load(deps.storage, token_info.name.to_string())?
     {
         reward_token
     } else {
-        return Err(ContractError::NoRewardTokenFound {});
+        return Err(StdError::generic_err("No reward token found"));
     };
 
     if token_info.reward_start_time + reward_token.mining_waiting_time < env.block.time.seconds() {
@@ -1001,10 +941,13 @@ pub fn execute_claim_reward(
         token_info.reward_start_time = env.block.time.seconds();
         tokens().save(deps.storage, &token_id, &token_info)?;
     } else {
-        return Err(ContractError::TimeNotReached {});
+        return Err(StdError::generic_err("Time not reached yet"));
     }
     USER_ENERGY_LEVEL.save(deps.storage, info.sender.to_string(), &user_energy_level)?;
-    Ok(Response::new())
+    Ok(Response::new()
+        .add_attribute("action", "claim_reward")
+        .add_attribute("sender", info.sender)
+        .add_attribute("token_id", token_id))
 }
 pub fn execute_revoke(
     deps: DepsMut,
@@ -1012,7 +955,7 @@ pub fn execute_revoke(
     info: MessageInfo,
     spender: String,
     token_id: String,
-) -> Result<Response, ContractError> {
+) -> StdResult<Response> {
     _update_approvals(deps, &env, &info, &spender, &token_id, false, None)?;
 
     Ok(Response::new()
@@ -1031,7 +974,7 @@ pub fn _update_approvals(
     // if add == false, remove. if add == true, remove then set with this expiration
     add: bool,
     expires: Option<Expiration>,
-) -> Result<TokenInfo, ContractError> {
+) -> StdResult<TokenInfo> {
     let mut token = tokens().load(deps.storage, token_id)?;
     // ensure we have permissions
     check_can_approve(deps.as_ref(), env, info, &token)?;
@@ -1049,7 +992,7 @@ pub fn _update_approvals(
         // reject expired data as invalid
         let expires = expires.unwrap_or_default();
         if expires.is_expired(&env.block) {
-            return Err(ContractError::Expired {});
+            return Err(StdError::generic_err("Expired"));
         }
         let approval = Approval {
             spender: spender_addr,
@@ -1071,11 +1014,11 @@ pub fn execute_approve_all(
     info: MessageInfo,
     operator: String,
     expires: Option<Expiration>,
-) -> Result<Response, ContractError> {
+) -> StdResult<Response> {
     // reject expired data as invalid
     let expires = expires.unwrap_or_default();
     if expires.is_expired(&env.block) {
-        return Err(ContractError::Expired {});
+        return Err(StdError::generic_err("Expired"));
     }
 
     // set the operator for us
@@ -1093,7 +1036,7 @@ pub fn execute_revoke_all(
     _env: Env,
     info: MessageInfo,
     operator: String,
-) -> Result<Response, ContractError> {
+) -> StdResult<Response> {
     let operator_addr = deps.api.addr_validate(&operator)?;
     OPERATORS.remove(deps.storage, (&info.sender, &operator_addr));
 
@@ -1109,7 +1052,7 @@ fn check_can_approve(
     env: &Env,
     info: &MessageInfo,
     token: &TokenInfo,
-) -> Result<(), ContractError> {
+) -> StdResult<()> {
     // owner can approve
     if token.owner == info.sender {
         return Ok(());
@@ -1119,22 +1062,17 @@ fn check_can_approve(
     match op {
         Some(ex) => {
             if ex.is_expired(&env.block) {
-                Err(ContractError::Unauthorized {})
+                Err(StdError::generic_err("Unauthorized"))
             } else {
                 Ok(())
             }
         }
-        None => Err(ContractError::Unauthorized {}),
+        None => Err(StdError::generic_err("Unauthorized")),
     }
 }
 
 /// returns true iff the sender can transfer ownership of the token
-fn check_can_send(
-    deps: Deps,
-    env: &Env,
-    info: &MessageInfo,
-    token: &TokenInfo,
-) -> Result<(), ContractError> {
+fn check_can_send(deps: Deps, env: &Env, info: &MessageInfo, token: &TokenInfo) -> StdResult<()> {
     // owner can send
     if token.owner == info.sender {
         return Ok(());
@@ -1154,12 +1092,12 @@ fn check_can_send(
     match op {
         Some(ex) => {
             if ex.is_expired(&env.block) {
-                Err(ContractError::Unauthorized {})
+                Err(StdError::generic_err("Unauthorized"))
             } else {
                 Ok(())
             }
         }
-        None => Err(ContractError::Unauthorized {}),
+        None => Err(StdError::generic_err("Unauthorized")),
     }
 }
 
@@ -1168,7 +1106,7 @@ fn execute_burn(
     env: Env,
     info: MessageInfo,
     token_id: String,
-) -> Result<Response, ContractError> {
+) -> StdResult<Response> {
     let token = tokens().load(deps.storage, &token_id)?;
     _check_can_send(deps.as_ref(), &env, &info, &token)?;
     burn(deps.storage, token_id.to_string());
@@ -1195,7 +1133,7 @@ pub fn _check_can_send(
     env: &Env,
     info: &MessageInfo,
     token: &TokenInfo,
-) -> Result<(), ContractError> {
+) -> StdResult<()> {
     // owner can send
     if token.owner == info.sender {
         return Ok(());
@@ -1215,12 +1153,12 @@ pub fn _check_can_send(
     match op {
         Some(ex) => {
             if ex.is_expired(&env.block) {
-                Err(ContractError::Unauthorized {})
+                Err(StdError::generic_err("Unauthorized"))
             } else {
                 Ok(())
             }
         }
-        None => Err(ContractError::Unauthorized {}),
+        None => Err(StdError::generic_err("Unauthorized")),
     }
 }
 
@@ -1257,11 +1195,13 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
             to_binary(&query_user_token_balance(deps, user_address)?)
         }
 
-        QueryMsg::QueryRemainingAllPackCount {} =>
-            to_binary(&query_remaining_all_pack_count(deps,)?),
-        QueryMsg::QueryRemainingPackCount {tool_type} =>
-            to_binary(&query_remaining_pack_count(deps, tool_type)?),
-            
+        QueryMsg::QueryRemainingAllPackCount {} => {
+            to_binary(&query_remaining_all_pack_count(deps)?)
+        }
+        QueryMsg::QueryRemainingPackCount { tool_type } => {
+            to_binary(&query_remaining_pack_count(deps, tool_type)?)
+        }
+        QueryMsg::QueryGameDevToken {} => to_binary(&query_game_dev_token(deps)?),
     }
 }
 
@@ -1290,49 +1230,44 @@ fn query_user_item_balance(
     }
 }
 
-fn query_remaining_all_pack_count(
-    deps: Deps,
-) -> StdResult<u64> {
-    let wood_miner_count = if let Some(tool_set) = TOOL_PACK_SET.may_load(deps.storage,"Wood Miner".to_string())?{
-        tool_set.len() as u64
-    } else {
-        0u64
-    };
-    let food_miner_count = if let Some(tool_set) = TOOL_PACK_SET.may_load(deps.storage,"Food Miner".to_string())?{
-        tool_set.len() as u64
-    } else {
-        0u64
-    };
-    let stone_miner_count = if let Some(tool_set) = TOOL_PACK_SET.may_load(deps.storage,"Stone Miner".to_string())?{
-        tool_set.len() as u64
-    } else {
-        0u64
-    };
-    let gold_miner_count = if let Some(tool_set) = TOOL_PACK_SET.may_load(deps.storage,"Gold Miner".to_string())?{
-        tool_set.len() as u64
-    } else {
-        0u64
-    };
+fn query_remaining_all_pack_count(deps: Deps) -> StdResult<u64> {
+    let wood_miner_count =
+        if let Some(tool_set) = TOOL_PACK_SET.may_load(deps.storage, "Wood Miner".to_string())? {
+            tool_set.len() as u64
+        } else {
+            0u64
+        };
+    let food_miner_count =
+        if let Some(tool_set) = TOOL_PACK_SET.may_load(deps.storage, "Food Miner".to_string())? {
+            tool_set.len() as u64
+        } else {
+            0u64
+        };
+    let stone_miner_count =
+        if let Some(tool_set) = TOOL_PACK_SET.may_load(deps.storage, "Stone Miner".to_string())? {
+            tool_set.len() as u64
+        } else {
+            0u64
+        };
+    let gold_miner_count =
+        if let Some(tool_set) = TOOL_PACK_SET.may_load(deps.storage, "Gold Miner".to_string())? {
+            tool_set.len() as u64
+        } else {
+            0u64
+        };
 
     Ok(gold_miner_count + stone_miner_count + food_miner_count + wood_miner_count)
-
 }
 
-fn query_remaining_pack_count(
-    deps: Deps,
-    tool_type: String
-) -> StdResult<u64> {
-
-    let tool_count = if let Some(tool_set) = TOOL_PACK_SET.may_load(deps.storage,tool_type.to_string())?{
+fn query_remaining_pack_count(deps: Deps, tool_type: String) -> StdResult<u64> {
+    let tool_count = if let Some(tool_set) = TOOL_PACK_SET.may_load(deps.storage, tool_type)? {
         tool_set.len() as u64
     } else {
         0u64
     };
 
     Ok(tool_count)
-
 }
-
 
 fn query_user_token_balance(deps: Deps, user_address: String) -> StdResult<Response> {
     let wood_token_addr = ITEM_TOKEN_MAPPING
@@ -1446,7 +1381,11 @@ fn query_nft_info(deps: Deps, token_id: String) -> StdResult<NftInfoResponse> {
     {
         nft_reward_info
     } else {
-        return Err(StdError::generic_err("token not found"));
+        RewardToken {
+            item_name: "None".to_string(),
+            mining_rate: 0u64,
+            mining_waiting_time: 0u64,
+        }
     };
 
     let mut template_key = info.tool_type.to_string();
@@ -1488,7 +1427,11 @@ fn query_all_nft_info(deps: Deps, env: Env, token_id: String) -> StdResult<AllNf
     {
         nft_reward_info
     } else {
-        return Err(StdError::generic_err("token not found"));
+        RewardToken {
+            item_name: "None".to_string(),
+            mining_rate: 0u64,
+            mining_waiting_time: 0u64,
+        }
     };
 
     let mut template_key = info.tool_type.to_string();
@@ -1590,6 +1533,10 @@ fn query_user_staked_info(deps: Deps, user_address: String) -> StdResult<HashSet
         };
 
     Ok(stake_token_ids)
+}
+
+fn query_game_dev_token(deps: Deps) -> StdResult<Vec<String>> {
+    Ok(GAME_DEV_TOKENS_NAME.load(deps.storage)?)
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
