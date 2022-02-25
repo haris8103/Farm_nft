@@ -2,13 +2,11 @@
 use cosmwasm_std::{
     entry_point, from_binary, to_binary, Binary,  CosmosMsg, Deps, DepsMut, Env,
     MessageInfo, Response,  StdResult, WasmMsg, QueryRequest,
-    WasmQuery,
+    WasmQuery, StdError,
 };
 
 use cw2::set_contract_version;
 use cw20::{Cw20ReceiveMsg};
-
-use crate::error::ContractError;
 use crate::msg::{
     Cw20HookMsg, ExecuteMsg, InstantiateMsg,
     MigrateMsg, QueryMsg, UpdateConfigMsg,
@@ -49,7 +47,7 @@ pub fn execute(
     env: Env,
     info: MessageInfo,
     msg: ExecuteMsg,
-) -> Result<Response, ContractError> {
+) -> StdResult<Response> {
     match msg {
         ExecuteMsg::Receive(msg) => execute_receive_cw20(deps, env, info, msg),
         ExecuteMsg::UpdateConfig(msg) => execute_update_config(deps, info, msg),
@@ -60,10 +58,10 @@ fn execute_update_config(
     deps: DepsMut,
     info: MessageInfo,
     msg: UpdateConfigMsg,
-) -> Result<Response, ContractError> {
+) -> StdResult<Response> {
     let mut config = CONFIG.load(deps.storage)?;
     if config.admin != info.sender {
-        return Err(ContractError::Unauthorized {});
+        return Err(StdError::generic_err("Unauthorized"));
     }
     if msg.admin.is_some() {
         config.admin = msg.admin.unwrap();
@@ -90,13 +88,13 @@ pub fn execute_receive_cw20(
     env: Env,
     info: MessageInfo,
     msg: Cw20ReceiveMsg,
-) -> Result<Response, ContractError> {
+) -> StdResult<Response> {
     match from_binary(&msg.msg) {
         Ok(Cw20HookMsg::PackFood {}) => execute_buy_pack(deps, env, info, msg, "Food Miner".to_string()),
         Ok(Cw20HookMsg::PackGold {}) => execute_buy_pack(deps, env, info, msg, "Gold Miner".to_string()),
         Ok(Cw20HookMsg::PackStone {}) => execute_buy_pack(deps, env, info, msg, "Stone Miner".to_string()),
         Ok(Cw20HookMsg::PackWood {}) => execute_buy_pack(deps, env, info, msg, "Wood Miner".to_string()),
-        Err(_err) => Err(ContractError::Unauthorized {}),
+        Err(_err) => Err(StdError::generic_err("Unauthorized")),
     }
 }
 
@@ -107,19 +105,19 @@ pub fn execute_buy_pack(
     info: MessageInfo,
     msg: Cw20ReceiveMsg,
     tool_type: String,
-) -> Result<Response, ContractError> {
+) -> StdResult<Response> {
     let config = CONFIG.load(deps.storage)?;
-    if config.ust_address != info.sender.to_string() {
-        return Err(ContractError::NotEligible{});
+    if config.ust_address != info.sender {
+        return Err(StdError::generic_err("Not eligible tokens provided"));
     }
 
     if msg.amount != config.pack_rate {
-        return Err(ContractError::InSufficientFunds{});
+        return Err(StdError::generic_err("Kindly provided amount mentioned in pack rate"));
     }
     let callback: CosmosMsg = CosmosMsg::Wasm(WasmMsg::Execute {
-        contract_addr: config.nft_contract_address.to_string(),
+        contract_addr: config.nft_contract_address,
         msg: to_binary(&NftExecuteMsg::TransferToolPack {
-            recipient: msg.sender.to_string(),
+            recipient: msg.sender,
             tool_type,
         })?,
         funds: vec![],
@@ -145,7 +143,7 @@ pub fn query_remaining_all_pack_count (
 ) -> StdResult<u64> {
     let config = CONFIG.load(deps.storage)?;
     let callback: u64  = deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
-        contract_addr: config.nft_contract_address.to_string(),
+        contract_addr: config.nft_contract_address,
         msg: to_binary(&NftQueryMsg::QueryRemainingAllPackCount{} 
         )?,
     }))?;
@@ -159,7 +157,7 @@ pub fn query_remaining_pack_count (
 ) -> StdResult<u64> {
     let config = CONFIG.load(deps.storage)?;
     let callback: u64 = deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
-        contract_addr: config.nft_contract_address.to_string(),
+        contract_addr: config.nft_contract_address,
         msg: to_binary(&NftQueryMsg::QueryRemainingPackCount {
             tool_type,
         })?,
