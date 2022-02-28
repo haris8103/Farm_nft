@@ -1,7 +1,7 @@
 [workspace]
 members = ["contracts/*"]
 
-[profile.release.package.loop-nft]
+[profile.release.package.farm-nft]
 codegen-units = 1
 incremental = false
 

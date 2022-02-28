@@ -118,11 +118,13 @@ pub fn execute_buy_pack(
         contract_addr: config.nft_contract_address,
         msg: to_binary(&NftExecuteMsg::TransferToolPack {
             recipient: msg.sender,
-            tool_type,
+            tool_type: tool_type.to_string(),
         })?,
         funds: vec![],
     });
-    Ok(Response::new().add_message(callback))
+    let mut msg = String::from(tool_type.as_str());
+    msg.push_str(" minted");
+    Ok(Response::new().add_message(callback).add_attribute("action", msg.to_string()))
 }
 
 
