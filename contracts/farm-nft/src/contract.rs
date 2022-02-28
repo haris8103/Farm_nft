@@ -166,7 +166,7 @@ fn execute_transfer_tool_pack(
     _transfer_nft(deps, &env, &info, &recipient, &token_id)?;
 
     Ok(Response::new()
-        .add_attribute("action", "transfer_tool_pack")
+        .add_attribute("action", "transfer tool pack")
         .add_attribute("sender", info.sender)
         .add_attribute("recipient", recipient)
         .add_attribute("token_id", token_id))
@@ -494,7 +494,7 @@ pub fn execute_admin_deposit(
     contract_item_amount += msg.amount;
     USER_ITEM_AMOUNT.save(deps.storage, contract_item_key, &contract_item_amount)?;
     Ok(Response::new()
-        .add_attribute("action", "admin_deposit")
+        .add_attribute("action", "admin deposit")
         .add_attribute("sender", msg.sender)
         .add_attribute("amount", msg.amount))
 }
@@ -535,7 +535,7 @@ pub fn execute_refill_energy(
     USER_ITEM_AMOUNT.save(deps.storage, info.sender.to_string(), &user_item_amount)?;
     distribute_amount(deps.storage, "gFood".to_string(), amount, &config, &env);
     Ok(Response::new()
-        .add_attribute("action", "refill_energy")
+        .add_attribute("action", "refill energy")
         .add_attribute("sender", info.sender)
         .add_attribute("amount", amount))
 }
@@ -551,7 +551,7 @@ pub fn execute_transfer_nft(
     _transfer_nft(deps, &env, &info, &recipient, &token_id)?;
 
     Ok(Response::new()
-        .add_attribute("action", "transfer_nft")
+        .add_attribute("action", "transfer nft")
         .add_attribute("sender", info.sender)
         .add_attribute("recipient", recipient)
         .add_attribute("token_id", token_id))
@@ -578,7 +578,7 @@ pub fn execute_send_nft(
     // Send message
     Ok(Response::new()
         .add_message(send.into_cosmos_msg(contract.clone())?) // calling receiving cw721 functionalithy
-        .add_attribute("action", "send_nft")
+        .add_attribute("action", "send nft")
         .add_attribute("sender", info.sender)
         .add_attribute("recipient", contract)
         .add_attribute("token_id", token_id))
@@ -778,7 +778,7 @@ pub fn execute_open_pack(deps: DepsMut, env: Env, msg: Cw721ReceiveMsg) -> StdRe
 
     Ok(Response::new()
         .add_messages(responses)
-        .add_attribute("action", "open_pack")
+        .add_attribute("action", "open pack")
         .add_attribute("sender", msg.sender)
         .add_attribute("pack_token_id", msg.token_id))
 }
@@ -945,7 +945,7 @@ pub fn execute_claim_reward(
     }
     USER_ENERGY_LEVEL.save(deps.storage, info.sender.to_string(), &user_energy_level)?;
     Ok(Response::new()
-        .add_attribute("action", "claim_reward")
+        .add_attribute("action", "claim reward")
         .add_attribute("sender", info.sender)
         .add_attribute("token_id", token_id))
 }
@@ -1026,7 +1026,7 @@ pub fn execute_approve_all(
     OPERATORS.save(deps.storage, (&info.sender, &operator_addr), &expires)?;
 
     Ok(Response::new()
-        .add_attribute("action", "approve_all")
+        .add_attribute("action", "approve all")
         .add_attribute("sender", info.sender)
         .add_attribute("operator", operator))
 }
@@ -1041,7 +1041,7 @@ pub fn execute_revoke_all(
     OPERATORS.remove(deps.storage, (&info.sender, &operator_addr));
 
     Ok(Response::new()
-        .add_attribute("action", "revoke_all")
+        .add_attribute("action", "revoke all")
         .add_attribute("sender", info.sender)
         .add_attribute("operator", operator))
 }
@@ -1099,6 +1099,16 @@ fn check_can_send(deps: Deps, env: &Env, info: &MessageInfo, token: &TokenInfo) 
         }
         None => Err(StdError::generic_err("Unauthorized")),
     }
+}
+
+pub fn execute_upgrade_tool_level(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+) -> StdResult<Response> {
+
+
+    Ok(Response::new().add_attribute("action", "update tool level"))
 }
 
 fn execute_burn(
