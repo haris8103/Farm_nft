@@ -90,10 +90,7 @@ pub fn execute_receive_cw20(
     msg: Cw20ReceiveMsg,
 ) -> StdResult<Response> {
     match from_binary(&msg.msg) {
-        Ok(Cw20HookMsg::PackFood {}) => execute_buy_pack(deps, env, info, msg, "Food Miner".to_string()),
-        Ok(Cw20HookMsg::PackGold {}) => execute_buy_pack(deps, env, info, msg, "Gold Miner".to_string()),
-        Ok(Cw20HookMsg::PackStone {}) => execute_buy_pack(deps, env, info, msg, "Stone Miner".to_string()),
-        Ok(Cw20HookMsg::PackWood {}) => execute_buy_pack(deps, env, info, msg, "Wood Miner".to_string()),
+        Ok(Cw20HookMsg::BuyPack {tool_type}) => execute_buy_pack(deps, env, info, msg, tool_type),
         Err(_err) => Err(StdError::generic_err("Unauthorized")),
     }
 }

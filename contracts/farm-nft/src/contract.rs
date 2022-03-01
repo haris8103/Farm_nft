@@ -23,9 +23,10 @@ use crate::msg::{
 };
 use crate::state::{
     distribute_amount, num_tokens, tokens, Approval, Config, RewardToken, TokenInfo, ToolTemplate,
-    CONFIG, CONTRACT_INFO, GAME_DEV_TOKENS_NAME, ITEM_TOKEN_MAPPING, LAST_GEN_TOKEN_ID, OPERATORS,
-    RARITY_TYPES, REWARD_TOKEN, TOKEN_COUNT, TOKEN_ITEM_MAPPING, TOOL_PACK_SET, TOOL_SET_MAP,
-    TOOL_TEMPLATE_MAP, TOOL_TYPE_NAMES, USER_ENERGY_LEVEL, USER_ITEM_AMOUNT, USER_STAKED_INFO,
+    ToolTemplateResponse, CONFIG, CONTRACT_INFO, GAME_DEV_TOKENS_NAME, ITEM_TOKEN_MAPPING,
+    LAST_GEN_TOKEN_ID, OPERATORS, RARITY_TYPES, REWARD_TOKEN, TOKEN_COUNT, TOKEN_ITEM_MAPPING,
+    TOOL_PACK_SET, TOOL_SET_MAP, TOOL_TEMPLATE_MAP, TOOL_TYPE_NAMES, USER_ENERGY_LEVEL,
+    USER_ITEM_AMOUNT, USER_STAKED_INFO,
 };
 
 const CONTRACT_NAME: &str = "crates.io:loop-nft";
@@ -66,12 +67,7 @@ pub fn instantiate(
     RARITY_TYPES.save(deps.storage, "Uncommon".to_string(), &"Rare".to_string())?;
     RARITY_TYPES.save(deps.storage, "Rare".to_string(), &"Legendary".to_string())?;
     RARITY_TYPES.save(deps.storage, "Legendary".to_string(), &"Mythic".to_string())?;
-    let mut game_dev_token_set = Vec::<String>::new();
-    game_dev_token_set.push("gWood".to_string());
-    game_dev_token_set.push("gFood".to_string());
-    game_dev_token_set.push("gGold".to_string());
-    game_dev_token_set.push("gStone".to_string());
-    GAME_DEV_TOKENS_NAME.save(deps.storage, &game_dev_token_set)?;
+    GAME_DEV_TOKENS_NAME.save(deps.storage, &vec![])?;
     Ok(Response::default())
 }
 
@@ -90,9 +86,9 @@ pub fn execute(deps: DepsMut, env: Env, info: MessageInfo, msg: ExecuteMsg) -> S
             msg,
         } => execute_send_nft(deps, env, info, contract, token_id, msg),
         ExecuteMsg::ReceiveNft(msg) => execute_receive_cw721(deps, env, info, msg),
-        ExecuteMsg::ClaimReward { token_id } => execute_claim_reward(deps, env, info, token_id),
-        ExecuteMsg::Unstake { token_id } => execute_unstake(deps, env, info, token_id),
-        ExecuteMsg::Receive(msg) => execute_receive_cw20(deps, env, info, msg),
+        // ExecuteMsg::ClaimReward { token_id } => execute_claim_reward(deps, env, info, token_id),
+        // ExecuteMsg::Unstake { token_id } => execute_unstake(deps, env, info, token_id),
+        // ExecuteMsg::Receive(msg) => execute_receive_cw20(deps, env, info, msg),
         ExecuteMsg::AddRewardToken {
             item_name,
             tool_name,
@@ -111,34 +107,53 @@ pub fn execute(deps: DepsMut, env: Env, info: MessageInfo, msg: ExecuteMsg) -> S
             execute_add_tool_type_names(deps, env, info, tool_type)
         }
         ExecuteMsg::BatchMint(msg) => execute_batch_mint(deps, env, info, msg),
-        ExecuteMsg::AddItemToken {
-            item_name,
-            item_token_addr,
-        } => execute_add_item_token(deps, env, info, item_name, item_token_addr),
-        ExecuteMsg::RefillEnergy { food_item_amount } => {
-            execute_refill_energy(deps, env, info, food_item_amount)
-        }
+        // ExecuteMsg::AddItemToken {
+        //     item_name,
+        //     item_token_addr,
+        // } => execute_add_item_token(deps, env, info, item_name, item_token_addr),
+        // ExecuteMsg::RefillEnergy { food_item_amount } => {
+        //     execute_refill_energy(deps, env, info, food_item_amount)
+        // }
 
-        ExecuteMsg::Withdraw { item_name, amount } => {
-            execute_withdraw(deps, env, info, item_name, amount)
-        }
+        // ExecuteMsg::Withdraw { item_name, amount } => {
+        //     execute_withdraw(deps, env, info, item_name, amount)
+        // }
         ExecuteMsg::AddToolTemplate(msg) => execute_add_tool_template(deps, env, info, msg),
-        ExecuteMsg::MintCommonNft { tool_type } => {
-            execute_mint_common_nft(deps, env, info, tool_type)
-        }
+        // ExecuteMsg::MintCommonNft { tool_type } => {
+        //     execute_mint_common_nft(deps, env, info, tool_type)
+        // }
 
-        ExecuteMsg::UpgradeNft { token_ids } => {
-            execute_mint_upgraded_nft(deps, env, info, token_ids)
-        }
+        // ExecuteMsg::UpgradeNft { token_ids } => {
+        //     execute_mint_upgraded_nft(deps, env, info, token_ids)
+        // }
         ExecuteMsg::UpdateConfig(msg) => execute_update_config(deps, info, msg),
 
-        ExecuteMsg::TransferReserveAmount {} => execute_transfer_reserve_amount(deps, info, env),
-
+        // ExecuteMsg::TransferReserveAmount {} => execute_transfer_reserve_amount(deps, info, env),
         ExecuteMsg::TransferToolPack {
             recipient,
             tool_type,
         } => execute_transfer_tool_pack(deps, info, env, recipient, tool_type),
+
+        ExecuteMsg::AddItemNames { item_name } => execute_add_item_name(deps, info, item_name),
     }
+}
+
+fn execute_add_item_name(
+    deps: DepsMut,
+    info: MessageInfo,
+    item_name: String,
+) -> StdResult<Response> {
+    let config = CONFIG.load(deps.storage)?;
+    if config.minter != info.sender {
+        return Err(StdError::generic_err("Unauthorized"));
+    }
+    let mut game_dev_token_set = GAME_DEV_TOKENS_NAME.load(deps.storage)?;
+    game_dev_token_set.push(item_name.to_string());
+    GAME_DEV_TOKENS_NAME.save(deps.storage, &game_dev_token_set)?;
+
+    Ok(Response::new()
+        .add_attribute("action", "add item name")
+        .add_attribute("sender", info.sender))
 }
 
 fn execute_transfer_tool_pack(
@@ -596,7 +611,7 @@ pub fn execute_receive_cw721(
         return Err(StdError::generic_err("Unauthorized"));
     }
     match from_binary(&msg.msg) {
-        Ok(Cw721HookMsg::Stake {}) => execute_stake(deps, env, msg),
+        // Ok(Cw721HookMsg::Stake {}) => execute_stake(deps, env, msg),
         Ok(Cw721HookMsg::OpenPack {}) => execute_open_pack(deps, env, msg),
         Err(_err) => Err(StdError::generic_err("no method found")),
     }
@@ -846,6 +861,7 @@ pub fn _transfer_nft(
     // set owner and remove existing approvals
     token.owner = deps.api.addr_validate(recipient)?;
     token.approvals = vec![];
+    
     tokens().save(deps.storage, token_id, &token)?;
     Ok(token)
 }
@@ -1101,16 +1117,6 @@ fn check_can_send(deps: Deps, env: &Env, info: &MessageInfo, token: &TokenInfo) 
     }
 }
 
-pub fn execute_upgrade_tool_level(
-    deps: DepsMut,
-    env: Env,
-    info: MessageInfo,
-) -> StdResult<Response> {
-
-
-    Ok(Response::new().add_attribute("action", "update tool level"))
-}
-
 fn execute_burn(
     deps: DepsMut,
     env: Env,
@@ -1212,6 +1218,8 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
             to_binary(&query_remaining_pack_count(deps, tool_type)?)
         }
         QueryMsg::QueryGameDevToken {} => to_binary(&query_game_dev_token(deps)?),
+        QueryMsg::QueryToolTypeNames {} => to_binary(&query_tool_type_names(deps)?),
+        QueryMsg::QueryToolPack {} => to_binary(&query_tool_pack_templates(deps)?),
     }
 }
 
@@ -1547,6 +1555,37 @@ fn query_user_staked_info(deps: Deps, user_address: String) -> StdResult<HashSet
 
 fn query_game_dev_token(deps: Deps) -> StdResult<Vec<String>> {
     Ok(GAME_DEV_TOKENS_NAME.load(deps.storage)?)
+}
+
+fn query_tool_type_names(deps: Deps) -> StdResult<Vec<String>> {
+    Ok(TOOL_TYPE_NAMES.load(deps.storage)?)
+}
+
+fn query_tool_pack_templates(deps: Deps) -> StdResult<Vec<ToolTemplateResponse>> {
+    let tool_type_names = TOOL_TYPE_NAMES.load(deps.storage)?;
+    let mut tool_template_responses = vec![];
+    for tool_type_name in tool_type_names.iter() {
+        let mut key = tool_type_name.to_string();
+        key.push_str("Pack");
+        let tool_pack_count = if let Some(tool_set) =
+            TOOL_PACK_SET.may_load(deps.storage, tool_type_name.to_string())?
+        {
+            tool_set.len() as u64
+        } else {
+            0u64
+        };
+        if let Some(tool_template) =
+            TOOL_TEMPLATE_MAP.may_load(deps.storage, key.to_string())?
+        {
+            tool_template_responses.push(ToolTemplateResponse {
+                name: tool_template.name,
+                description: tool_template.description,
+                image: tool_template.image,
+                count: tool_pack_count,
+            })
+        }
+    }
+    Ok(tool_template_responses)
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]

@@ -185,6 +185,14 @@ pub struct ToolTemplate {
     pub required_amount: Vec<Uint128>,
 }
 
+#[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
+pub struct ToolTemplateResponse {
+    pub name: String,
+    pub description: String,
+    pub image: String,
+    pub count: u64,
+}
+
 pub const RARITY_TYPES: Map<String, String> = Map::new("Rarities"); // contains rarity stages for upgradation
 pub const CONFIG: Item<Config> = Item::new("Config");
 pub const TOOL_SET_MAP: Map<String, Vec<String>> = Map::new("ToolSet"); // contains tool set section wise e.g. (wood miner -> Axe, Saw e.t.c)

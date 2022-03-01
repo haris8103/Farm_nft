@@ -41,10 +41,7 @@ pub enum QueryMsg {
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum Cw20HookMsg {
-    PackWood {},
-    PackGold {},
-    PackFood {},
-    PackStone {},
+    BuyPack {tool_type: String},
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

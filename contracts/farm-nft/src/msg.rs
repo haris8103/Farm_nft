@@ -96,16 +96,15 @@ pub enum ExecuteMsg {
 
     ReceiveNft(Cw721ReceiveMsg),
 
-    ClaimReward {
-        token_id: String,
-    },
+    // ClaimReward {
+    //     token_id: String,
+    // },
 
-    Unstake {
-        token_id: String,
-    },
+    // Unstake {
+    //     token_id: String,
+    // },
 
-    Receive(Cw20ReceiveMsg),
-
+    // Receive(Cw20ReceiveMsg),
     AddRewardToken {
         item_name: String,
         tool_name: String,
@@ -115,30 +114,31 @@ pub enum ExecuteMsg {
     AddToolTypeNames {
         tool_type: String,
     },
+    AddItemNames {
+        item_name: String,
+    },
     BatchMint(MintMsg),
-    AddItemToken {
-        item_name: String,
-        item_token_addr: String,
-    },
-    RefillEnergy {
-        food_item_amount: u64,
-    },
-    Withdraw {
-        item_name: String,
-        amount: Uint128,
-    },
+    // AddItemToken {
+    //     item_name: String,
+    //     item_token_addr: String,
+    // },
+    // RefillEnergy {
+    //     food_item_amount: u64,
+    // },
+    // Withdraw {
+    //     item_name: String,
+    //     amount: Uint128,
+    // },
     AddToolTemplate(ToolTemplateMsg),
-    MintCommonNft {
-        tool_type: String,
-    },
-    UpgradeNft {
-        token_ids: Vec<String>,
-    },
-
+    // MintCommonNft {
+    //     tool_type: String,
+    // },
+    // UpgradeNft {
+    //     token_ids: Vec<String>,
+    // },
     UpdateConfig(UpdateConfigMsg),
 
-    TransferReserveAmount {},
-
+    // TransferReserveAmount {},
     TransferToolPack {
         recipient: String,
         tool_type: String,
@@ -214,6 +214,8 @@ pub enum QueryMsg {
     },
 
     QueryGameDevToken {},
+    QueryToolTypeNames {},
+    QueryToolPack {},
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
@@ -254,7 +256,7 @@ pub struct AllNftInfoResponse {
 #[serde(rename_all = "snake_case")]
 pub enum Cw721HookMsg {
     /// Who can transfer the token
-    Stake {},
+    // Stake {},
     /// Data on the token itself,
     OpenPack {},
 }
