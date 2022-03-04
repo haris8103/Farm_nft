@@ -6,6 +6,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
+pub const REPAIR_KIT_KEYWORD: &str = "RepKit";
+pub const PACK_KEYWORD: &str = "Pack";
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct TokenInfo {
     /// The owner of the newly minted NFT
@@ -26,6 +29,10 @@ pub struct TokenInfo {
     pub tool_type: String,
     /// durability will get low when reward is claimed
     pub durability: u64,
+
+    pub is_repair_kit: bool,
+
+    pub repair_kit_available_time: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
@@ -93,6 +100,7 @@ pub struct Config {
     pub stake_limit: u64,    //to limit the user to stake tools
     pub durability_start_time: u64, //start time of deducing durability
     pub reserve_addr: String, //reserve address for contract pool funds
+    pub repair_kit_waiting_time: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
@@ -199,3 +207,6 @@ pub const LAST_GEN_TOKEN_ID: Item<u64> = Item::new("LastGenTokenId"); //contains
 pub const TOOL_TEMPLATE_MAP: Map<String, ToolTemplate> = Map::new("ToolTemplateMap"); //contains the template of tool or snapshot to create the new one
 pub const GAME_DEV_TOKENS_NAME: Item<Vec<String>> = Item::new("GameDevTokensName"); // contains the name of game dev token e.g. gWood, gGold e.t.c
 pub const TOOL_PACK_SET: Map<String, Vec<String>> = Map::new("ToolPackSet"); //contains pack set against tool type
+pub const USER_REPAIR_KITS: Map<String, String> = Map::new("UserRepairKits");
+pub const REPAIR_KIT_SET: Map<String, Vec<String>> = Map::new("RepairKitSet");
+pub const REPAIRING_FEE: Map<String, Uint128> = Map::new("RepairingFee");

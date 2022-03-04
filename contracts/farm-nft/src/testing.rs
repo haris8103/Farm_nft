@@ -27,6 +27,7 @@ mod tests {
             stake_limit: 20,
             durability_from_start_time: 2592000,
             reserve_addr: "reserve_address".to_string(),
+            repair_kit_waiting_time: 360u64,
         };
         let minter = mock_info(&"minter".to_string(), &[]);
         let user = mock_info(&"user1".to_string(), &[]);

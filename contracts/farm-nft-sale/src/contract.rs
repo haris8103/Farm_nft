@@ -1,19 +1,13 @@
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::{
-    entry_point, from_binary, to_binary, Binary,  CosmosMsg, Deps, DepsMut, Env,
-    MessageInfo, Response,  StdResult, WasmMsg, QueryRequest,
-    WasmQuery, StdError,
+    entry_point, from_binary, to_binary, Binary, CosmosMsg, Deps, DepsMut, Env, MessageInfo,
+    QueryRequest, Response, StdError, StdResult, WasmMsg, WasmQuery,
 };
 
+use crate::msg::{Cw20HookMsg, ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg, UpdateConfigMsg};
+use crate::state::{Config, CONFIG};
 use cw2::set_contract_version;
-use cw20::{Cw20ReceiveMsg};
-use crate::msg::{
-    Cw20HookMsg, ExecuteMsg, InstantiateMsg,
-    MigrateMsg, QueryMsg, UpdateConfigMsg,
-};
-use crate::state::{
-    Config, CONFIG,
-};
+use cw20::Cw20ReceiveMsg;
 use farm_nft::msg::{ExecuteMsg as NftExecuteMsg, QueryMsg as NftQueryMsg};
 
 const CONTRACT_NAME: &str = "crates.io:loop-nft";
@@ -38,16 +32,8 @@ pub fn instantiate(
     Ok(Response::default())
 }
 
-
-
-
 #[cfg_attr(not(feature = "library"), entry_point)]
-pub fn execute(
-    deps: DepsMut,
-    env: Env,
-    info: MessageInfo,
-    msg: ExecuteMsg,
-) -> StdResult<Response> {
+pub fn execute(deps: DepsMut, env: Env, info: MessageInfo, msg: ExecuteMsg) -> StdResult<Response> {
     match msg {
         ExecuteMsg::Receive(msg) => execute_receive_cw20(deps, env, info, msg),
         ExecuteMsg::UpdateConfig(msg) => execute_update_config(deps, info, msg),
@@ -90,10 +76,18 @@ pub fn execute_receive_cw20(
     msg: Cw20ReceiveMsg,
 ) -> StdResult<Response> {
     match from_binary(&msg.msg) {
-        Ok(Cw20HookMsg::PackFood {}) => execute_buy_pack(deps, env, info, msg, "Food Miner".to_string()),
-        Ok(Cw20HookMsg::PackGold {}) => execute_buy_pack(deps, env, info, msg, "Gold Miner".to_string()),
-        Ok(Cw20HookMsg::PackStone {}) => execute_buy_pack(deps, env, info, msg, "Stone Miner".to_string()),
-        Ok(Cw20HookMsg::PackWood {}) => execute_buy_pack(deps, env, info, msg, "Wood Miner".to_string()),
+        Ok(Cw20HookMsg::PackFood {}) => {
+            execute_buy_pack(deps, env, info, msg, "Food Miner".to_string())
+        }
+        Ok(Cw20HookMsg::PackGold {}) => {
+            execute_buy_pack(deps, env, info, msg, "Gold Miner".to_string())
+        }
+        Ok(Cw20HookMsg::PackStone {}) => {
+            execute_buy_pack(deps, env, info, msg, "Stone Miner".to_string())
+        }
+        Ok(Cw20HookMsg::PackWood {}) => {
+            execute_buy_pack(deps, env, info, msg, "Wood Miner".to_string())
+        }
         Err(_err) => Err(StdError::generic_err("Unauthorized")),
     }
 }
@@ -112,7 +106,9 @@ pub fn execute_buy_pack(
     }
 
     if msg.amount != config.pack_rate {
-        return Err(StdError::generic_err("Kindly provided amount mentioned in pack rate"));
+        return Err(StdError::generic_err(
+            "Kindly provided amount mentioned in pack rate",
+        ));
     }
     let callback: CosmosMsg = CosmosMsg::Wasm(WasmMsg::Execute {
         contract_addr: config.nft_contract_address,
@@ -124,49 +120,40 @@ pub fn execute_buy_pack(
     });
     let mut msg = String::from(tool_type.as_str());
     msg.push_str(" minted");
-    Ok(Response::new().add_message(callback).add_attribute("action", msg.to_string()))
+    Ok(Response::new()
+        .add_message(callback)
+        .add_attribute("action", msg.to_string()))
 }
-
-
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
-        QueryMsg::QueryRemainingAllPackCount{}
-            => to_binary(&query_remaining_all_pack_count(deps)?),
-        QueryMsg::QueryRemainingPackCount {
-            tool_type
-        } => to_binary(&query_remaining_pack_count(deps, tool_type)?),
+        QueryMsg::QueryRemainingAllPackCount {} => {
+            to_binary(&query_remaining_all_pack_count(deps)?)
+        }
+        QueryMsg::QueryRemainingPackCount { tool_type } => {
+            to_binary(&query_remaining_pack_count(deps, tool_type)?)
+        }
     }
 }
 
-pub fn query_remaining_all_pack_count (
-    deps: Deps,
-) -> StdResult<u64> {
-    let config = CONFIG.load(deps.storage)?;
-    let callback: u64  = deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
-        contract_addr: config.nft_contract_address,
-        msg: to_binary(&NftQueryMsg::QueryRemainingAllPackCount{} 
-        )?,
-    }))?;
-    Ok(callback)
-}
-
-
-pub fn query_remaining_pack_count (
-    deps: Deps,
-    tool_type: String,
-) -> StdResult<u64> {
+pub fn query_remaining_all_pack_count(deps: Deps) -> StdResult<u64> {
     let config = CONFIG.load(deps.storage)?;
     let callback: u64 = deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
         contract_addr: config.nft_contract_address,
-        msg: to_binary(&NftQueryMsg::QueryRemainingPackCount {
-            tool_type,
-        })?,
+        msg: to_binary(&NftQueryMsg::QueryRemainingAllPackCount {})?,
     }))?;
     Ok(callback)
 }
 
+pub fn query_remaining_pack_count(deps: Deps, tool_type: String) -> StdResult<u64> {
+    let config = CONFIG.load(deps.storage)?;
+    let callback: u64 = deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
+        contract_addr: config.nft_contract_address,
+        msg: to_binary(&NftQueryMsg::QueryRemainingPackCount { tool_type })?,
+    }))?;
+    Ok(callback)
+}
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Response> {

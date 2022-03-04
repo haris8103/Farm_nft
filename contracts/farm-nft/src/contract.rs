@@ -6,7 +6,7 @@ use cosmwasm_std::{
 };
 use cw0::maybe_addr;
 use cw2::set_contract_version;
-use cw20::{BalanceResponse as Cw20BalanceResponse, Cw20ExecuteMsg, Cw20QueryMsg, Cw20ReceiveMsg};
+use cw20::{BalanceResponse, Cw20ExecuteMsg, Cw20QueryMsg, Cw20ReceiveMsg};
 use cw721::{
     ContractInfoResponse, Cw721ReceiveMsg, Expiration, NumTokensResponse, OwnerOfResponse,
     TokensResponse,
@@ -24,8 +24,9 @@ use crate::msg::{
 use crate::state::{
     distribute_amount, num_tokens, tokens, Approval, Config, RewardToken, TokenInfo, ToolTemplate,
     CONFIG, CONTRACT_INFO, GAME_DEV_TOKENS_NAME, ITEM_TOKEN_MAPPING, LAST_GEN_TOKEN_ID, OPERATORS,
-    RARITY_TYPES, REWARD_TOKEN, TOKEN_COUNT, TOKEN_ITEM_MAPPING, TOOL_PACK_SET, TOOL_SET_MAP,
-    TOOL_TEMPLATE_MAP, TOOL_TYPE_NAMES, USER_ENERGY_LEVEL, USER_ITEM_AMOUNT, USER_STAKED_INFO,
+    RARITY_TYPES, REPAIRING_FEE, REPAIR_KIT_KEYWORD, REWARD_TOKEN, TOKEN_COUNT, TOKEN_ITEM_MAPPING,
+    TOOL_PACK_SET, TOOL_SET_MAP, TOOL_TEMPLATE_MAP, TOOL_TYPE_NAMES, USER_ENERGY_LEVEL,
+    USER_ITEM_AMOUNT, USER_REPAIR_KITS, USER_STAKED_INFO,
 };
 
 const CONTRACT_NAME: &str = "crates.io:loop-nft";
@@ -56,21 +57,14 @@ pub fn instantiate(
         stake_limit: msg.stake_limit,
         durability_start_time: env.block.time.seconds() + msg.durability_from_start_time,
         reserve_addr: msg.reserve_addr,
+        repair_kit_waiting_time: msg.repair_kit_waiting_time,
     };
 
     CONTRACT_INFO.save(deps.storage, &contract_info)?;
     CONFIG.save(deps.storage, &config)?;
     TOOL_TYPE_NAMES.save(deps.storage, &vec![])?;
     LAST_GEN_TOKEN_ID.save(deps.storage, &0u64)?;
-    RARITY_TYPES.save(deps.storage, "Common".to_string(), &"Uncommon".to_string())?;
-    RARITY_TYPES.save(deps.storage, "Uncommon".to_string(), &"Rare".to_string())?;
-    RARITY_TYPES.save(deps.storage, "Rare".to_string(), &"Legendary".to_string())?;
-    RARITY_TYPES.save(deps.storage, "Legendary".to_string(), &"Mythic".to_string())?;
-    let mut game_dev_token_set = Vec::<String>::new();
-    game_dev_token_set.push("gWood".to_string());
-    game_dev_token_set.push("gFood".to_string());
-    game_dev_token_set.push("gGold".to_string());
-    game_dev_token_set.push("gStone".to_string());
+    let game_dev_token_set = Vec::<String>::new();
     GAME_DEV_TOKENS_NAME.save(deps.storage, &game_dev_token_set)?;
     Ok(Response::default())
 }
@@ -138,6 +132,23 @@ pub fn execute(deps: DepsMut, env: Env, info: MessageInfo, msg: ExecuteMsg) -> S
             recipient,
             tool_type,
         } => execute_transfer_tool_pack(deps, info, env, recipient, tool_type),
+
+        ExecuteMsg::AddItemName { item_name } => execute_adding_item(deps, info, item_name),
+
+        ExecuteMsg::AddRaritiesMapping {
+            tool_type,
+            upgraded_tool_type,
+        } => execute_add_rarities_mapping(deps, info, tool_type, upgraded_tool_type),
+
+        ExecuteMsg::UnstakeRepairKit {
+            repair_kit_token_id,
+        } => execute_unstake_repair_tool(deps, info, env, repair_kit_token_id),
+
+        ExecuteMsg::UseRepairKit { token_id } => execute_use_repair_tool(deps, info, env, token_id),
+
+        ExecuteMsg::AddRepairingFee { rarity, fee } => {
+            execute_add_repairing_fee(deps, info, rarity, fee)
+        }
     }
 }
 
@@ -205,6 +216,55 @@ fn execute_update_config(
     Ok(Response::new()
         .add_attribute("action", "update config")
         .add_attribute("sender", info.sender))
+}
+
+fn execute_add_rarities_mapping(
+    deps: DepsMut,
+    info: MessageInfo,
+    tool_type: String,
+    upgraded_tool_type: String,
+) -> StdResult<Response> {
+    let config = CONFIG.load(deps.storage)?;
+    if config.minter != info.sender {
+        return Err(StdError::generic_err("Unauthorized"));
+    }
+    RARITY_TYPES.save(deps.storage, tool_type.to_string(), &upgraded_tool_type)?;
+    Ok(Response::new()
+        .add_attribute("action", "add rarities mapping")
+        .add_attribute("tool type", tool_type)
+        .add_attribute("upgraded tool type", upgraded_tool_type))
+}
+
+fn execute_adding_item(deps: DepsMut, info: MessageInfo, item_name: String) -> StdResult<Response> {
+    let config = CONFIG.load(deps.storage)?;
+    if config.minter != info.sender {
+        return Err(StdError::generic_err("Unauthorized"));
+    }
+    let mut game_dev_token_set = GAME_DEV_TOKENS_NAME.load(deps.storage)?;
+    game_dev_token_set.push(item_name.to_string());
+    Ok(Response::new()
+        .add_attribute("action", "item added")
+        .add_attribute("item", item_name))
+}
+
+fn execute_add_repairing_fee(
+    deps: DepsMut,
+    info: MessageInfo,
+    rarity: String,
+    fee: Uint128,
+) -> StdResult<Response> {
+    let config = CONFIG.load(deps.storage)?;
+
+    if config.minter == info.sender {
+        return Err(StdError::generic_err("Unauthorized"));
+    }
+
+    REPAIRING_FEE.save(deps.storage, rarity.to_string(), &fee)?;
+
+    Ok(Response::new()
+        .add_attribute("action", "item added")
+        .add_attribute("rarity", rarity)
+        .add_attribute("fee", fee))
 }
 
 /// to transfer reserve amount of contract pool to withdraw
@@ -598,6 +658,7 @@ pub fn execute_receive_cw721(
     match from_binary(&msg.msg) {
         Ok(Cw721HookMsg::Stake {}) => execute_stake(deps, env, msg),
         Ok(Cw721HookMsg::OpenPack {}) => execute_open_pack(deps, env, msg),
+        Ok(Cw721HookMsg::StakeRepairKit {}) => execute_stake_repair_kit(deps, info, env, msg),
         Err(_err) => Err(StdError::generic_err("no method found")),
     }
 }
@@ -783,6 +844,167 @@ pub fn execute_open_pack(deps: DepsMut, env: Env, msg: Cw721ReceiveMsg) -> StdRe
         .add_attribute("pack_token_id", msg.token_id))
 }
 
+pub fn execute_stake_repair_kit(
+    deps: DepsMut,
+    _info: MessageInfo,
+    env: Env,
+    msg: Cw721ReceiveMsg,
+) -> StdResult<Response> {
+    let config = CONFIG.load(deps.storage)?;
+    let mut token = if let Some(token) = tokens().may_load(deps.storage, &msg.token_id)? {
+        token
+    } else {
+        return Err(StdError::generic_err("No Token Found"));
+    };
+    let mut user_repair_kit_key = msg.sender.to_string();
+    user_repair_kit_key.push_str(REPAIR_KIT_KEYWORD);
+    user_repair_kit_key.push_str(token.tool_type.to_string().as_str());
+    if USER_REPAIR_KITS.has(deps.storage, user_repair_kit_key.to_string()) {
+        return Err(StdError::generic_err("Repair kit is already deployed"));
+    }
+    USER_REPAIR_KITS.save(deps.storage, user_repair_kit_key, &msg.token_id)?;
+    token.repair_kit_available_time = env.block.time.seconds() + config.repair_kit_waiting_time;
+    tokens().save(deps.storage, &msg.token_id, &token)?;
+    Ok(Response::new()
+        .add_attribute("action", "repair kit staked")
+        .add_attribute("token id", msg.token_id)
+        .add_attribute("tool_type", token.tool_type))
+}
+
+pub fn execute_unstake_repair_tool(
+    deps: DepsMut,
+    info: MessageInfo,
+    env: Env,
+    repair_kit_token_id: String,
+) -> StdResult<Response> {
+    let token = if let Some(token) = tokens().may_load(deps.storage, &repair_kit_token_id)? {
+        token
+    } else {
+        return Err(StdError::generic_err("no token available"));
+    };
+
+    let mut user_repair_kit_key = info.sender.to_string();
+    user_repair_kit_key.push_str(REPAIR_KIT_KEYWORD);
+    user_repair_kit_key.push_str(token.tool_type.to_string().as_str());
+
+    let user_repair_kit_id = if let Some(user_repair_kit_id) =
+        USER_REPAIR_KITS.may_load(deps.storage, user_repair_kit_key.to_string())?
+    {
+        user_repair_kit_id
+    } else {
+        return Err(StdError::generic_err("User do not stake any repair kit"));
+    };
+    let user_repair_kit_token = if let Some(user_repair_kit_token) =
+        tokens().may_load(deps.storage, &user_repair_kit_id)?
+    {
+        user_repair_kit_token
+    } else {
+        return Err(StdError::generic_err("no user repair kit token available"));
+    };
+    if user_repair_kit_token.repair_kit_available_time < env.block.time.seconds() {
+        USER_REPAIR_KITS.remove(deps.storage, user_repair_kit_key);
+    } else {
+        return Err(StdError::generic_err("Time not reached yet"));
+    }
+    let response = CosmosMsg::Wasm(WasmMsg::Execute {
+        contract_addr: env.contract.address.into_string(),
+        msg: to_binary(&ExecuteMsg::TransferNft {
+            recipient: info.sender.to_string(),
+            token_id: repair_kit_token_id.to_string(),
+        })?,
+        funds: vec![],
+    });
+
+    Ok(Response::new()
+        .add_message(response)
+        .add_attribute("action", "repair kit unstaked")
+        .add_attribute("token id", repair_kit_token_id)
+        .add_attribute("tool_type", token.tool_type))
+}
+
+pub fn execute_use_repair_tool(
+    deps: DepsMut,
+    info: MessageInfo,
+    env: Env,
+    token_id: String,
+) -> StdResult<Response> {
+    let config = CONFIG.load(deps.storage)?;
+    let mut token = if let Some(token) = tokens().may_load(deps.storage, &token_id)? {
+        token
+    } else {
+        return Err(StdError::generic_err("no token available"));
+    };
+    let mut template_key = token.tool_type.to_string();
+    template_key.push_str(token.rarity.to_string().as_str());
+    let tool_template = TOOL_TEMPLATE_MAP.load(deps.storage, template_key)?;
+    let mut user_repair_kit_key = info.sender.to_string();
+    user_repair_kit_key.push_str(REPAIR_KIT_KEYWORD);
+    user_repair_kit_key.push_str(token.tool_type.to_string().as_str());
+    let repairing_fee = if let Some(repairing_fee) =
+        REPAIRING_FEE.may_load(deps.storage, token.tool_type.to_string())?
+    {
+        repairing_fee
+    } else {
+        return Err(StdError::generic_err("Repairing Fee is not set"));
+    };
+    let user_repair_kit_id = if let Some(user_repair_kit_id) =
+        USER_REPAIR_KITS.may_load(deps.storage, user_repair_kit_key)?
+    {
+        user_repair_kit_id
+    } else {
+        return Err(StdError::generic_err(
+            "User do not deploy any tool's repair kit",
+        ));
+    };
+    let reward_item =
+        if let Some(reward_item) = REWARD_TOKEN.may_load(deps.storage, token.name.to_string())? {
+            reward_item
+        } else {
+            return Err(StdError::generic_err("No item found against tool"));
+        };
+    let mut user_item_key = info.sender.to_string();
+    user_item_key.push_str(reward_item.item_name.as_str());
+    let mut user_item_amount =
+        if let Some(user_item_amount) = USER_ITEM_AMOUNT.may_load(deps.storage, user_item_key)? {
+            user_item_amount
+        } else {
+            return Err(StdError::generic_err("No item available in user account"));
+        };
+    if user_item_amount < repairing_fee {
+        return Err(StdError::generic_err("Insufficient items"));
+    }
+    user_item_amount -= repairing_fee;
+    distribute_amount(
+        deps.storage,
+        reward_item.item_name.to_string(),
+        repairing_fee,
+        &config,
+        &env,
+    );
+    let mut user_repair_kit_token = if let Some(user_repair_kit_token) =
+        tokens().may_load(deps.storage, &user_repair_kit_id)?
+    {
+        user_repair_kit_token
+    } else {
+        return Err(StdError::generic_err("no user repair kit token available"));
+    };
+    if token.durability == tool_template.durability {
+        return Err(StdError::generic_err(
+            "tool is perfectly fine no need to repair",
+        ));
+    }
+    if user_repair_kit_token.repair_kit_available_time < env.block.time.seconds() {
+        token.durability = tool_template.durability;
+        user_repair_kit_token.repair_kit_available_time = env.block.time.seconds();
+    } else {
+        return Err(StdError::generic_err("Time not reached yet"));
+    }
+
+    tokens().save(deps.storage, &token_id, &token)?;
+    tokens().save(deps.storage, &user_repair_kit_id, &user_repair_kit_token)?;
+    Ok(Response::new().add_attribute("action", "repair tool"))
+}
+
 ///transfer opened pack nft
 pub fn transfer_pack_nfts(
     store: &mut dyn Storage,
@@ -800,20 +1022,16 @@ pub fn transfer_pack_nfts(
             token_ids
         } else {
             let mut message = " tool type: ".to_string();
-            message.push_str(&tool_type.to_string());
+            message.push_str(&tool_type);
             message.push_str(" error in token ids");
             return Err(StdError::generic_err(message));
         };
-    println!(
-        "tool_type.to_string() {}, token ids {} ",
-        tool_type.to_string(),
-        token_ids.len()
-    );
+
     let random_number = generate_random_number(
         time_in_epoch_seconds + token_ids.len() as u64,
         token_ids.len() as u64,
     );
-    if token_ids.len() == 0 {
+    if token_ids.is_empty() {
         return Ok(false);
     }
     let token_id = token_ids.swap_remove(random_number as usize);
@@ -924,7 +1142,11 @@ pub fn execute_claim_reward(
         } else {
             Uint128::zero()
         };
-
+        if token_info.durability < 1 {
+            return Err(StdError::generic_err(
+                "Kindly repair the tool first to claim reward",
+            ));
+        }
         if config.durability_start_time < env.block.time.seconds() {
             token_info.durability -= 1;
         }
@@ -1101,15 +1323,13 @@ fn check_can_send(deps: Deps, env: &Env, info: &MessageInfo, token: &TokenInfo) 
     }
 }
 
-pub fn execute_upgrade_tool_level(
-    deps: DepsMut,
-    env: Env,
-    info: MessageInfo,
-) -> StdResult<Response> {
-
-
-    Ok(Response::new().add_attribute("action", "update tool level"))
-}
+// pub fn execute_upgrade_tool_level(
+//     deps: DepsMut,
+//     env: Env,
+//     info: MessageInfo,
+// ) -> StdResult<Response> {
+//     Ok(Response::new().add_attribute("action", "update tool level"))
+// }
 
 fn execute_burn(
     deps: DepsMut,
@@ -1241,32 +1461,18 @@ fn query_user_item_balance(
 }
 
 fn query_remaining_all_pack_count(deps: Deps) -> StdResult<u64> {
-    let wood_miner_count =
-        if let Some(tool_set) = TOOL_PACK_SET.may_load(deps.storage, "Wood Miner".to_string())? {
+    let mut remaining_packs = 0u64;
+    let game_dev_tokens_name = GAME_DEV_TOKENS_NAME.load(deps.storage)?;
+    for game_dev_token_name in game_dev_tokens_name {
+        remaining_packs += if let Some(tool_set) =
+            TOOL_PACK_SET.may_load(deps.storage, game_dev_token_name.to_string())?
+        {
             tool_set.len() as u64
         } else {
             0u64
         };
-    let food_miner_count =
-        if let Some(tool_set) = TOOL_PACK_SET.may_load(deps.storage, "Food Miner".to_string())? {
-            tool_set.len() as u64
-        } else {
-            0u64
-        };
-    let stone_miner_count =
-        if let Some(tool_set) = TOOL_PACK_SET.may_load(deps.storage, "Stone Miner".to_string())? {
-            tool_set.len() as u64
-        } else {
-            0u64
-        };
-    let gold_miner_count =
-        if let Some(tool_set) = TOOL_PACK_SET.may_load(deps.storage, "Gold Miner".to_string())? {
-            tool_set.len() as u64
-        } else {
-            0u64
-        };
-
-    Ok(gold_miner_count + stone_miner_count + food_miner_count + wood_miner_count)
+    }
+    Ok(remaining_packs)
 }
 
 fn query_remaining_pack_count(deps: Deps, tool_type: String) -> StdResult<u64> {
@@ -1280,94 +1486,48 @@ fn query_remaining_pack_count(deps: Deps, tool_type: String) -> StdResult<u64> {
 }
 
 fn query_user_token_balance(deps: Deps, user_address: String) -> StdResult<Response> {
-    let wood_token_addr = ITEM_TOKEN_MAPPING
-        .may_load(deps.storage, "gWood".to_string())?
-        .unwrap();
-    let food_token_addr = ITEM_TOKEN_MAPPING
-        .may_load(deps.storage, "gFood".to_string())?
-        .unwrap();
-    let stone_token_addr = ITEM_TOKEN_MAPPING
-        .may_load(deps.storage, "gStone".to_string())?
-        .unwrap();
-    let gold_token_addr = ITEM_TOKEN_MAPPING
-        .may_load(deps.storage, "gGold".to_string())?
-        .unwrap();
+    let mut tokens_map = vec![];
+    let game_dev_tokens_name = GAME_DEV_TOKENS_NAME.load(deps.storage)?;
+    for game_dev_token_name in game_dev_tokens_name.clone() {
+        let item_token = if let Some(item_token) =
+            ITEM_TOKEN_MAPPING.may_load(deps.storage, game_dev_token_name.to_string())?
+        {
+            item_token
+        } else {
+            let mut error_message = String::from(game_dev_token_name.as_str());
+            error_message.push_str(" game dev token not found");
+            return Err(StdError::generic_err(error_message));
+        };
+        let amount: BalanceResponse =
+            deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
+                contract_addr: item_token,
+                msg: to_binary(&Cw20QueryMsg::Balance {
+                    address: user_address.to_string(),
+                })?,
+            }))?;
 
-    let wood_amount: Cw20BalanceResponse =
-        deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
-            contract_addr: wood_token_addr,
-            msg: to_binary(&Cw20QueryMsg::Balance {
-                address: user_address.to_string(),
-            })?,
-        }))?;
+        tokens_map.push((game_dev_token_name.to_string(), amount.balance));
+    }
 
-    let food_amount: Cw20BalanceResponse =
-        deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
-            contract_addr: food_token_addr,
-            msg: to_binary(&Cw20QueryMsg::Balance {
-                address: user_address.to_string(),
-            })?,
-        }))?;
-
-    let gold_amount: Cw20BalanceResponse =
-        deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
-            contract_addr: stone_token_addr,
-            msg: to_binary(&Cw20QueryMsg::Balance {
-                address: user_address.to_string(),
-            })?,
-        }))?;
-
-    let stone_amount: Cw20BalanceResponse =
-        deps.querier.query(&QueryRequest::Wasm(WasmQuery::Smart {
-            contract_addr: gold_token_addr,
-            msg: to_binary(&Cw20QueryMsg::Balance {
-                address: user_address,
-            })?,
-        }))?;
-
-    Ok(Response::new()
-        .add_attribute("wood token balance", wood_amount.balance.to_string())
-        .add_attribute("food token balance", food_amount.balance.to_string())
-        .add_attribute("gold token balance", gold_amount.balance.to_string())
-        .add_attribute("stone token balance", stone_amount.balance.to_string()))
+    Ok(Response::new().add_attributes(tokens_map))
 }
 
 fn query_user_item_info(deps: Deps, user_address: String) -> StdResult<Response> {
-    let mut user_item_key = user_address.to_string();
-    user_item_key.push_str("gWood");
-    let g_wood_amount =
-        if let Some(g_wood_amount) = USER_ITEM_AMOUNT.may_load(deps.storage, user_item_key)? {
-            g_wood_amount
+    let mut tokens_map = vec![];
+    let game_dev_tokens_name = GAME_DEV_TOKENS_NAME.load(deps.storage)?;
+    for game_dev_token_name in game_dev_tokens_name.clone() {
+        let mut user_item_key = user_address.to_string();
+        user_item_key.push_str(game_dev_token_name.as_str());
+        let game_dev_token_amount = if let Some(game_dev_token_amount) =
+            USER_ITEM_AMOUNT.may_load(deps.storage, user_item_key)?
+        {
+            game_dev_token_amount
         } else {
             Uint128::zero()
         };
 
-    let mut user_item_key = user_address.to_string();
-    user_item_key.push_str("gFood");
-    let g_food_amount =
-        if let Some(g_food_amount) = USER_ITEM_AMOUNT.may_load(deps.storage, user_item_key)? {
-            g_food_amount
-        } else {
-            Uint128::zero()
-        };
-
-    let mut user_item_key = user_address.to_string();
-    user_item_key.push_str("gGold");
-    let g_gold_amount =
-        if let Some(g_gold_amount) = USER_ITEM_AMOUNT.may_load(deps.storage, user_item_key)? {
-            g_gold_amount
-        } else {
-            Uint128::zero()
-        };
-
-    let mut user_item_key = user_address.to_string();
-    user_item_key.push_str("gStone");
-    let g_stone_amount =
-        if let Some(g_stone_amount) = USER_ITEM_AMOUNT.may_load(deps.storage, user_item_key)? {
-            g_stone_amount
-        } else {
-            Uint128::zero()
-        };
+        tokens_map.push((game_dev_token_name.to_string(), game_dev_token_amount));
+    }
 
     let user_energy =
         if let Some(user_energy) = USER_ENERGY_LEVEL.may_load(deps.storage, user_address)? {
@@ -1375,13 +1535,9 @@ fn query_user_item_info(deps: Deps, user_address: String) -> StdResult<Response>
         } else {
             Uint128::zero()
         };
-
     Ok(Response::new()
-        .add_attribute("gWood", g_wood_amount)
-        .add_attribute("gFood", g_food_amount)
-        .add_attribute("gGold", g_gold_amount)
-        .add_attribute("gStone", g_stone_amount)
-        .add_attribute("user_energy", user_energy))
+        .add_attributes(tokens_map)
+        .add_attribute("user energy", user_energy))
 }
 
 fn query_nft_info(deps: Deps, token_id: String) -> StdResult<NftInfoResponse> {
@@ -1546,7 +1702,7 @@ fn query_user_staked_info(deps: Deps, user_address: String) -> StdResult<HashSet
 }
 
 fn query_game_dev_token(deps: Deps) -> StdResult<Vec<String>> {
-    Ok(GAME_DEV_TOKENS_NAME.load(deps.storage)?)
+    GAME_DEV_TOKENS_NAME.load(deps.storage)
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]

@@ -24,6 +24,8 @@ pub struct InstantiateMsg {
     pub durability_from_start_time: u64,
 
     pub reserve_addr: String,
+
+    pub repair_kit_waiting_time: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -143,6 +145,28 @@ pub enum ExecuteMsg {
         recipient: String,
         tool_type: String,
     },
+
+    AddItemName {
+        item_name: String,
+    },
+
+    AddRaritiesMapping {
+        tool_type: String,
+        upgraded_tool_type: String,
+    },
+
+    UnstakeRepairKit {
+        repair_kit_token_id: String,
+    },
+
+    UseRepairKit {
+        token_id: String,
+    },
+
+    AddRepairingFee {
+        rarity: String,
+        fee: Uint128,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -257,6 +281,8 @@ pub enum Cw721HookMsg {
     Stake {},
     /// Data on the token itself,
     OpenPack {},
+
+    StakeRepairKit {},
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]

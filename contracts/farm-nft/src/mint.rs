@@ -5,8 +5,8 @@ use crate::contract::{_check_can_send, burn};
 use crate::msg::MintMsg;
 use crate::state::{
     distribute_amount, increment_tokens, tokens, TokenInfo, CONFIG, GAME_DEV_TOKENS_NAME,
-    LAST_GEN_TOKEN_ID, RARITY_TYPES, TOOL_PACK_SET, TOOL_SET_MAP, TOOL_TEMPLATE_MAP,
-    USER_ITEM_AMOUNT,
+    LAST_GEN_TOKEN_ID, PACK_KEYWORD, RARITY_TYPES, REPAIR_KIT_KEYWORD, REPAIR_KIT_SET,
+    TOOL_PACK_SET, TOOL_SET_MAP, TOOL_TEMPLATE_MAP, USER_ITEM_AMOUNT,
 };
 
 /// to mint multiple nfts in a single transaction
@@ -80,6 +80,8 @@ pub fn mint(store: &mut dyn Storage, env: &Env, msg: &MintMsg) -> u64 {
         pre_mint_tool: msg.pre_mint_tool.clone().unwrap_or_else(|| "".to_string()),
         tool_type: msg.tool_type.to_string(),
         durability: tool_template.durability,
+        is_repair_kit: false,
+        repair_kit_available_time: env.block.time.seconds(),
     };
     increment_tokens(store).unwrap();
     let last_gen_token_id = LAST_GEN_TOKEN_ID.load(store).unwrap();
@@ -102,7 +104,7 @@ pub fn mint(store: &mut dyn Storage, env: &Env, msg: &MintMsg) -> u64 {
         TOOL_SET_MAP
             .save(store, msg.tool_type.to_string(), &token_ids)
             .unwrap();
-    } else if msg.rarity.eq_ignore_ascii_case("Pack") {
+    } else if msg.rarity.eq_ignore_ascii_case(PACK_KEYWORD) {
         let mut tool_pack_set = if let Some(tool_pack_set) = TOOL_PACK_SET
             .may_load(store, msg.tool_type.to_string())
             .unwrap()
@@ -116,6 +118,20 @@ pub fn mint(store: &mut dyn Storage, env: &Env, msg: &MintMsg) -> u64 {
             .save(store, msg.tool_type.to_string(), &tool_pack_set)
             .unwrap();
         token.is_pack_token = true;
+    } else if msg.rarity.eq_ignore_ascii_case(REPAIR_KIT_KEYWORD) {
+        let mut repair_kit_set = if let Some(repair_kit_set) = REPAIR_KIT_SET
+            .may_load(store, msg.tool_type.to_string())
+            .unwrap()
+        {
+            repair_kit_set
+        } else {
+            vec![]
+        };
+        repair_kit_set.push(new_toke_id.to_string());
+        REPAIR_KIT_SET
+            .save(store, msg.tool_type.to_string(), &repair_kit_set)
+            .unwrap();
+        token.is_repair_kit = true;
     }
     tokens()
         .update(store, &new_toke_id.to_string(), |old| match old {
