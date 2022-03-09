@@ -1,5 +1,4 @@
 use cosmwasm_std::Uint128;
-use cw20::Cw20ReceiveMsg;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -23,8 +22,23 @@ pub struct UpdateConfigMsg {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecuteMsg {
-    Receive(Cw20ReceiveMsg),
+    BuyPack {
+        tool_type: String,
+        stage: u8,
+        proof: Vec<String>,
+    },
     UpdateConfig(UpdateConfigMsg),
+    RegisterMerkleRoot {
+        /// MerkleRoot is hex-encoded merkle root.
+        merkle_root: String,
+    },
+    // Claim does not check if contract has enough funds, owner must ensure it.
+    // Claim {
+    //     stage: u8,
+    //     amount: Uint128,
+    //     /// Proof is hex-encoded merkle proof.
+    //     proof: Vec<String>,
+    // },
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -33,15 +47,26 @@ pub enum QueryMsg {
     QueryRemainingAllPackCount {},
 
     QueryRemainingPackCount { tool_type: String },
+    MerkleRoot { stage: u8 },
+    LatestStage {},
+    IsClaimed { stage: u8, address: String },
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
-#[serde(rename_all = "snake_case")]
-pub enum Cw20HookMsg {
-    PackWood {},
-    PackGold {},
-    PackFood {},
-    PackStone {},
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct MerkleRootResponse {
+    pub stage: u8,
+    /// MerkleRoot is hex-encoded merkle root.
+    pub merkle_root: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct LatestStageResponse {
+    pub latest_stage: u8,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+pub struct IsClaimedResponse {
+    pub is_claimed: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]

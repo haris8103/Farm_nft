@@ -317,8 +317,10 @@ dependencies = [
  "cw721",
  "cw721-base",
  "farm-nft",
+ "hex",
  "schemars",
  "serde",
+ "sha2",
  "thiserror",
 ]
 

@@ -33,6 +33,7 @@ pub struct TokenInfo {
     pub is_repair_kit: bool,
 
     pub repair_kit_available_time: u64,
+
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
@@ -191,7 +192,9 @@ pub struct ToolTemplate {
     pub rarity: String,
     pub durability: u64,
     pub required_amount: Vec<Uint128>,
+    pub token_uri: Option<String>,
 }
+
 
 pub const RARITY_TYPES: Map<String, String> = Map::new("Rarities"); // contains rarity stages for upgradation
 pub const CONFIG: Item<Config> = Item::new("Config");

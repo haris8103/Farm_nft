@@ -58,6 +58,7 @@ pub struct MintMsg {
     pub minting_count: Option<u64>,
 
     pub tool_type: String, //common tool name
+
 }
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct BoostMsg {
@@ -262,7 +263,7 @@ pub struct Extension {
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, JsonSchema, Debug)]
 pub struct NftInfoResponse {
-    pub token_uri: String,
+    pub token_uri: Option<String>,
     pub extension: Extension,
 }
 
@@ -311,6 +312,7 @@ pub struct ToolTemplateMsg {
     pub required_ggold_amount: Uint128,
     pub required_gstone_amount: Uint128,
     pub durability: u64,
+    pub token_uri: Option<String>,
 }
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
 pub struct MigrateMsg {}

@@ -26,7 +26,7 @@ use crate::state::{
     CONFIG, CONTRACT_INFO, GAME_DEV_TOKENS_NAME, ITEM_TOKEN_MAPPING, LAST_GEN_TOKEN_ID, OPERATORS,
     RARITY_TYPES, REPAIRING_FEE, REPAIR_KIT_KEYWORD, REWARD_TOKEN, TOKEN_COUNT, TOKEN_ITEM_MAPPING,
     TOOL_PACK_SET, TOOL_SET_MAP, TOOL_TEMPLATE_MAP, TOOL_TYPE_NAMES, USER_ENERGY_LEVEL,
-    USER_ITEM_AMOUNT, USER_REPAIR_KITS, USER_STAKED_INFO,
+    USER_ITEM_AMOUNT, USER_REPAIR_KITS, USER_STAKED_INFO,  
 };
 
 const CONTRACT_NAME: &str = "crates.io:loop-nft";
@@ -148,7 +148,7 @@ pub fn execute(deps: DepsMut, env: Env, info: MessageInfo, msg: ExecuteMsg) -> S
 
         ExecuteMsg::AddRepairingFee { rarity, fee } => {
             execute_add_repairing_fee(deps, info, rarity, fee)
-        }
+        },
     }
 }
 
@@ -338,6 +338,7 @@ fn execute_add_tool_template(
         rarity: msg.rarity.to_string(),
         required_amount: vec![],
         durability: msg.durability,
+        token_uri: msg.token_uri,
     };
 
     tool_template
@@ -1435,6 +1436,7 @@ pub fn query(deps: Deps, env: Env, msg: QueryMsg) -> StdResult<Binary> {
     }
 }
 
+
 fn query_contract_info(deps: Deps) -> StdResult<ContractInfoResponse> {
     CONTRACT_INFO.load(deps.storage)
 }
@@ -1565,7 +1567,7 @@ fn query_nft_info(deps: Deps, token_id: String) -> StdResult<NftInfoResponse> {
     };
 
     Ok(NftInfoResponse {
-        token_uri: tool_template.image.to_string(),
+        token_uri: tool_template.token_uri,
         extension: Extension {
             name: info.name,
             description: tool_template.description,
@@ -1616,7 +1618,7 @@ fn query_all_nft_info(deps: Deps, env: Env, token_id: String) -> StdResult<AllNf
             approvals: humanize_approvals(&env.block, &info),
         },
         info: NftInfoResponse {
-            token_uri: tool_template.image.to_string(),
+            token_uri: tool_template.token_uri,
             extension: Extension {
                 name: info.name,
                 description: tool_template.description,
@@ -1705,7 +1707,29 @@ fn query_game_dev_token(deps: Deps) -> StdResult<Vec<String>> {
     GAME_DEV_TOKENS_NAME.load(deps.storage)
 }
 
-#[cfg_attr(not(feature = "library"), entry_point)]
-pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Response> {
+// #[cfg_attr(not(feature = "library"), entry_point)]
+// pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Response> {
+//     Ok(Response::default())
+// }
+
+
+
+#[entry_point]
+pub fn migrate(deps: DepsMut, _env: Env, _msg: MigrateMsg) -> StdResult<Response> {
+    let ver = cw2::get_contract_version(deps.storage)?;
+    // ensure we are migrating from an allowed contract
+    if ver.contract != CONTRACT_NAME {
+        return Err(StdError::generic_err("Can only upgrade from same type").into());
+    }
+    // note: better to do proper semver compare, but string compare *usually* works
+    // if ver.version >= CONTRACT_VERSION.to_string() {
+    //     return Err(StdError::generic_err("Cannot upgrade from a newer version").into());
+    // }
+    
+    // set the new version
+    cw2::set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
+    
+    // do any desired state migrations...
+    
     Ok(Response::default())
 }
