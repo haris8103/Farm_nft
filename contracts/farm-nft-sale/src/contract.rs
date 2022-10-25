@@ -258,13 +258,15 @@ pub fn assert_sent_native_token_balance(
 
     if coin.is_some() {
         if pack_rate == coin.unwrap().amount {
-            Ok(claim(
-                store,
-                message_info,
-                stage,
-                &coin.unwrap().amount,
-                proof,
-            )?)
+            Ok(Response::default()
+            //     claim(
+            //     store,
+            //     message_info,
+            //     stage,
+            //     &coin.unwrap().amount,
+            //     proof,
+            // )?
+        )
         } else {
             Err(StdError::generic_err("Please provide required coins"))
         }
